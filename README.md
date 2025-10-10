@@ -1,1 +1,1 @@
-# bot-zanuda-pytests
+# Bot Zanuda - Integration Tests
