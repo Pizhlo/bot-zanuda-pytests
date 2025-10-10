@@ -10,6 +10,7 @@ class WebServerAPIClient(APIClient):
     def __init__(self) -> None:
         super().__init__()
         self.client.base_url = str(config.webserver.base_url)
+        self.client.timeout = config.webserver.timeout
 
     def get_metrics(self) -> Response:
         return self.client.get("/metrics")
