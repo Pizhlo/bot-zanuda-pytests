@@ -1,0 +1,12 @@
+[project]
+name = "pytests"
+version = "0.1.0"
+description = "Pytest test suite for bot-zanuda"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "httpx>=0.28.1",
+    "pydantic>=2.12.0",
+    "pydantic-settings[yaml]>=2.11.0",
+    "pytest>=8.4.2",
+]
