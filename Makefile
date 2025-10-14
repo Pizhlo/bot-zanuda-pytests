@@ -57,3 +57,20 @@ docker-push:
 docker-login:
 	@echo "Logging in to $(REGISTRY)..."
 	docker login $(REGISTRY)
+
+docker-tests-auth-service-up:
+	docker compose -f docker-compose.auth-service.yaml --profile init run --rm setup-vault
+	docker compose -f docker-compose.auth-service.yaml --profile init run --rm rabbitmq-setup
+	docker compose -f docker-compose.auth-service.yaml --profile init run --rm fga-migrate
+	docker compose -f docker-compose.auth-service.yaml up --build --abort-on-container-exit --exit-code-from pytests --remove-orphans --force-recreate pytests
+
+docker-tests-auth-service-down:
+	docker compose -f docker-compose.auth-service.yaml down --remove-orphans
+
+docker-tests-auth-service:
+	@$(MAKE) docker-tests-auth-service-up; \
+	status=$$?; \
+	$(MAKE) docker-tests-auth-service-down; \
+	exit $$status
+
+.PHONY: docker-tests-auth-service-up docker-tests-auth-service-down docker-tests-auth-service
