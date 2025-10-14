@@ -1,0 +1,216 @@
+services:
+  vault:
+    image: hashicorp/vault:1.18
+    container_name: auth-service-vault-tests
+    ports:
+      - "${VAULT_PORT:-8200}:8200"
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_DEV_ROOT_TOKEN}
+      VAULT_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
+    cap_add:
+      - IPC_LOCK
+    healthcheck:
+      test: ["CMD-SHELL", "VAULT_ADDR=http://127.0.0.1:8200 vault status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    command: ["server", "-dev"]
+
+  setup-vault: # подготавливает vault для работы сервиса. добавляет bot API key в vault.
+    image: hashicorp/vault:1.18
+    container_name: auth-service-vault-setup
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_DEV_ROOT_TOKEN}
+      BOT_API_KEY: ${BOT_API_KEY} # bot API key
+      VAULT_ADDR: "http://127.0.0.1:8200"
+      VAULT_SECRETS_PATH: ${VAULT_SECRETS_PATH:-secret/data/api-key} # путь по умолчанию, если не задан
+    depends_on:
+      vault:
+        condition: service_healthy 
+    volumes:
+      - vault_data:/vault/file 
+    profiles:
+      - init
+    network_mode: "service:vault"
+    command: >
+      sh -c "
+        echo '🔑 Vault initialized' &&
+        vault login $${VAULT_DEV_ROOT_TOKEN_ID} &&
+        if vault kv put $${VAULT_SECRETS_PATH} api_key=$${BOT_API_KEY}; then
+          echo '✅ API key written to $${VAULT_SECRETS_PATH}' &&
+          echo '🔑 Setup complete' &&
+          exit 0
+        else
+          echo '❌ FAILED to write API key to $${VAULT_SECRETS_PATH}' &&
+          exit 1
+        fi
+      "
+
+  redis:
+    image: "redis:alpine"
+    container_name: auth-service-redis-tests
+    restart: always
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+
+  postgres:
+    image: postgres:16
+    container_name: auth-service-postgres-tests
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB_AUTH_SERVICE}
+      POSTGRES_USER: ${POSTGRES_USER_AUTH_SERVICE}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD_AUTH_SERVICE}
+    ports:
+      - "${POSTGRES_PORT_AUTH_SERVICE:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d
+    command: ["postgres", "-c", "wal_level=logical", "-c", "max_wal_senders=10", "-c", "max_replication_slots=10"]
+    healthcheck:
+      test: pg_isready -U ${POSTGRES_USER_AUTH_SERVICE} -d ${POSTGRES_DB_AUTH_SERVICE}
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  auth-service:
+    image: pizhlo/bot-zanuda-auth-service:latest
+    container_name: auth-service-tests
+    volumes:
+      - ${CONFIG_PATH_AUTH_SERVICE:-./auth-srv.yaml}:/app/config.yaml:ro
+      - ${OPEN_FGA_CONFIG:-./fga}:/app/fga
+    depends_on:
+        postgres:
+          condition: service_healthy
+        redis:
+          condition: service_started
+        vault:
+          condition: service_started
+        rabbitmq:
+          condition: service_healthy
+        open-fga:
+          condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/v0/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    ports:
+      - "${AUTH_SERVICE_PORT:-8080}:8080"
+
+  pytests:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ${CONFIG_PATH_PYTESTS:-./config-pytests.yaml}:/app/config.yaml:ro
+    command: make test-auth-service
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: auth-service-rabbitmq-tests
+    restart: always
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+
+  # Инициализация очередей: DLX, DLQ, policy и очередь errors.auth-service.
+  # Запускается отдельно через `make docker-tests-up` (profile init), не вместе с `up`:
+  # иначе `--abort-on-container-exit` остановит стек при exit code 0 setup-контейнера.
+  rabbitmq-setup:
+    image: curlimages/curl
+    container_name: auth-service-rabbitmq-setup-tests
+    profiles:
+      - init
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    network_mode: "service:rabbitmq"
+    volumes:
+      - ./scripts/rabbitmq-setup.sh:/setup/rabbitmq-setup.sh:ro
+    command: ["sh", "/setup/rabbitmq-setup.sh"]
+
+  postgres-fga:
+    image: postgres:16
+    container_name: auth-service-postgres-fga-tests
+    volumes:
+      - openfga-pgdata:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER_FGA}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD_FGA}
+      POSTGRES_DB: ${POSTGRES_DB_FGA}
+    ports:
+      - "${POSTGRES_PORT_FGA:-5433}:5432"
+    healthcheck:
+      test: pg_isready -U ${POSTGRES_USER_FGA} -d ${POSTGRES_DB_FGA}
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  fga-migrate: # миграции схемы БД OpenFGA (обязательны перед первым запуском)
+    image: openfga/openfga
+    container_name: auth-service-fga-migrate-tests
+    restart: "no"
+    profiles:
+      - init
+    command:
+      - migrate
+      - --datastore-engine=postgres
+      - --datastore-uri=postgres://${POSTGRES_USER_FGA}:${POSTGRES_PASSWORD_FGA}@postgres-fga:5432/${POSTGRES_DB_FGA}?sslmode=disable
+    depends_on:
+      postgres-fga:
+        condition: service_healthy
+
+  open-fga: # OpenFGA для управления ролями и разрешениями
+    image: openfga/openfga
+    container_name: auth-service-openfga-tests
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER_FGA}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD_FGA}
+      POSTGRES_DB: ${POSTGRES_DB_FGA}
+      POSTGRES_HOST: ${POSTGRES_HOST_FGA}
+      POSTGRES_PORT: ${POSTGRES_PORT_FGA}
+    ports:
+      - "8081:8081"
+      - "8082:8082"
+    volumes:
+      - openfga-data:/data
+    command:
+      - run
+      - --datastore-engine=postgres
+      - --datastore-uri=postgres://${POSTGRES_USER_FGA}:${POSTGRES_PASSWORD_FGA}@postgres-fga:5432/${POSTGRES_DB_FGA}?sslmode=disable
+      - --grpc-addr=0.0.0.0:8082
+      - --http-addr=0.0.0.0:8081
+    depends_on:
+      postgres-fga:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/grpc_health_probe", "-addr=localhost:8082"]
+      interval: 5s
+      timeout: 30s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  vault_data:
+  redis-data:
+  pgdata:
+  rabbitmq-data:
+  openfga-data:
+  openfga-pgdata:

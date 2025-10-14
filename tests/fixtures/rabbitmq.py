@@ -62,5 +62,17 @@ def note_messages_from_rabbitmq(
 def auth_service_error_messages_from_rabbitmq(
     rabbitmq: RabbitMQ,
 ) -> ContextManager[Optional[bytes]]:
-    """Фикстура, возвращающая сообщение из очереди ошибок сервиса авторизации"""
+    """Готовит очередь ошибок для одного сценария на сохраняемом тестовом стенде.
+
+    Остатки предыдущего неудачного теста не должны подменять ожидаемый audit event.
+    Очистка выполняется при получении фикстуры, до HTTP-запроса теста. Другие очереди
+    не затрагиваются; параллельные сценарии с общей очередью не поддерживаются.
+    """
+    if rabbitmq.connection is None:
+        raise RuntimeError("RabbitMQ connection is not established")
+    channel = rabbitmq.connection.channel()
+    try:
+        channel.queue_purge(queue=rabbitmq.config.auth_service_error_queue)
+    finally:
+        channel.close()
     return _get_messages_from_queue(rabbitmq, rabbitmq.config.auth_service_error_queue)

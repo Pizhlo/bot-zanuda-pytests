@@ -24,5 +24,16 @@ All API clients SHALL be in `src/api_clients/` directory.
 ## CI/CD Requirements
 All commits SHALL pass `make lint` validation.
 All commits SHALL pass `make typecheck` (mypy).
-All pull requests SHALL have passing tests.
+Изменения тестов auth-service и их общих зависимостей SHALL проходить соответствующий CI.
+Workflow auth-service SHALL использовать paths из specs/autotests/pipeline.md; ручной запуск сохраняется.
 Test coverage SHALL be reported in CI.
+
+## Подготовка данных фикстурой (актуальный контракт)
+
+Для auth-service сессионная autouse-фикстура выполняет все testdata/auth-service/*.up.sql
+через psycopg одной транзакцией. ON CONFLICT по фиксированным тестовым ключам позволяет
+повторный запуск; другие записи не затрагиваются. Базовый набор остаётся для IDE,
+временные ресурсы отдельных тестов очищаются их фикстурами. SEED_DATA=false локально
+пропускает подготовку; CI требует true. Прямая make test-data-auth-service-up использует
+тот же загрузчик без запуска pytest. CLI migrate и история версий тестовых данных
+не используются. Миграции схемы выполняет только auth-service.

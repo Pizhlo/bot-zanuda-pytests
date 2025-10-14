@@ -2,6 +2,8 @@
 Конфигурация для тестов
 """
 
+import os
+
 from pydantic import AnyUrl, Field
 from pydantic_settings import (
     BaseSettings,
@@ -33,6 +35,18 @@ class AuthServiceConfig(BaseSettings):
     secret_key: str = Field()
 
 _DEFAULT_QUEUE_POLL_ATTEMPTS = 30
+
+class OpenFGAConfig(BaseSettings):
+    """Адрес тестового OpenFGA для адресной очистки связей, созданных pytest.
+
+    Имя хранилища должно совпадать с конфигом auth-service. Доступ используется
+    только тестовыми фикстурами: рабочую логику создания проверяет API сервиса.
+    """
+
+    base_url: AnyUrl = Field(default=AnyUrl("http://localhost:8081"))
+    store_name: str = Field(default="bot-zanuda")
+    timeout: int = Field(default=API_TIMEOUT)
+
 
 class RabbitMQConfig(BaseSettings):
     """Конфигурация для RabbitMQ"""
@@ -81,6 +95,7 @@ class Config(BaseSettings):
     vault: VaultConfig = Field(default_factory=VaultConfig)
     postgres: PostgresConfig = Field(default_factory=PostgresConfig)
     auth_service: AuthServiceConfig
+    openfga: OpenFGAConfig = Field(default_factory=OpenFGAConfig)
 
     model_config = SettingsConfigDict(
         yaml_file="config.yaml", env_file_encoding="utf-8", extra="ignore"
@@ -95,7 +110,8 @@ class Config(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-        return (YamlConfigSettingsSource(settings_cls),)
+        """Загружает YAML текущего прогона из PYTEST_CONFIG либо локальный config.yaml."""
+        return (YamlConfigSettingsSource(settings_cls, yaml_file=os.environ.get("PYTEST_CONFIG") or "config.yaml"),)
 
 
 # Глобальный экземпляр конфигурации

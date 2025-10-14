@@ -43,7 +43,7 @@ make docker-login     # login to Docker registry
 - End-to-end tests for entire project (web server, auth service, bot)
 - Currently testing: web server and auth service
 - Future: bot tests
-- Tests run in isolated Docker environment
+- Auth-service environments use the pinned testkit (container or Linux host modes)
 - Each test suite has its own database schema
 
 ## Test Patterns
@@ -88,3 +88,36 @@ Before adding or changing a test scenario, fixture, API client, test environment
 2. If it is not described, propose adding it to `spec.md` before implementing the test.
 3. Keep test specifications, project constitution, and test code consistent.
 4. Not invent endpoint paths, authentication flows, status codes, token TTLs, or response fields without specification support.
+
+## Жизненный цикл тестового окружения auth-service
+
+Контракт окружения и загрузки данных описан в `specs/autotests/pipeline.md`.
+Для полного изолированного цикла используйте integration-run, для подготовки — integration-up.
+Локально один стенд на постоянных портах; seed/test/logs/down не требуют RUN_ID.
+CI сохраняет явный RUN_ID и отдельные ресурсы.
+SQL остаются в testdata/auth-service; tools/seed_auth.py вызывает общий загрузчик
+фикстуры без pytest. Все SQL выполняются атомарно, без migrate и таблицы версий.
+Для IDE PYTEST_CONFIG выбирает YAML из pytests; default config.yaml потребителя. Локальный запуск собирает текущие тесты и SQL.
+Make-команда авторизации отключает автоматические отчёты Allure; остальные наборы сохраняют настройки.
+Локальная ошибка сохраняет окружение и текстовые логи; контейнерный успех удаляет их.
+В AUTH_MODE=host зависимостями управляет containers-up/down из auth-service.
+Повторный host-run не перезапускает инфраструктуру; SEED_DATA=false пропускает seed локально.
+CI всегда собирает логи перед попыткой уборки. Ручные тесты требуют ручного down.
+Одноразовые тестовые реквизиты testkit допустимы; настоящие секреты по-прежнему запрещены.
+Не меняйте отдельный workflow webserver.
+
+Для host/host не требовать integration-up и не вызывать Docker: seed и pytest запускаются
+на хосте с одним PYTEST_CONFIG (по умолчанию config.yaml pytests). Локальные YAML
+пользователя не переписывать и не коммитить. Данные подготавливает pytest либо отдельная Make-команда.
+Compose overlays нужны только контейнерным/смешанным сценариям.
+
+
+## Подготовка данных фикстурой (актуальный контракт)
+
+Для auth-service сессионная autouse-фикстура выполняет все testdata/auth-service/*.up.sql
+через psycopg одной транзакцией. ON CONFLICT по фиксированным тестовым ключам позволяет
+повторный запуск; другие записи не затрагиваются. Базовый набор остаётся для IDE,
+временные ресурсы отдельных тестов очищаются их фикстурами. SEED_DATA=false локально
+пропускает подготовку; CI требует true. Прямая make test-data-auth-service-up использует
+тот же загрузчик без запуска pytest. CLI migrate и история версий тестовых данных
+не используются. Миграции схемы выполняет только auth-service.
