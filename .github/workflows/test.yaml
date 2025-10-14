@@ -1,0 +1,205 @@
+name: Test Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        
+    - name: Install uv
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+        
+    - name: Install dependencies
+      run: make install
+        
+    - name: Clone private repository with migrations
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ secrets.MIGRATIONS_REPO }}
+        ssh-key: ${{ secrets.DEPLOY_KEY }} 
+        path: migrations
+        fetch-depth: 1
+        ref: main
+
+    - name: Create .env for Docker Compose
+      run: |
+        cat > .env <<EOF
+        WEB_SERVER_PORT=${{ secrets.WEB_SERVER_PORT }}
+        REDIS_PORT=${{ secrets.REDIS_PORT }}
+        RABBITMQ_PORT=${{ secrets.RABBITMQ_PORT }}
+        RABBITMQ_PORT_WEB=${{ secrets.RABBITMQ_PORT_WEB }}
+        RABBITMQ_USER=${{ secrets.RABBITMQ_USER }}
+        RABBITMQ_PASSWORD=${{ secrets.RABBITMQ_PASSWORD }}
+        POSTGRES_DB=${{ secrets.POSTGRES_DB }}
+        POSTGRES_USER=${{ secrets.POSTGRES_USER }}
+        POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+        POSTGRES_PORT=${{ secrets.POSTGRES_PORT }}
+        EOF
+        chmod 600 .env
+
+    - name: Create server config from secret
+      run: |
+        mkdir -p config
+        echo '${{ secrets.SERVER_CONFIG }}' > config/server.yaml
+        chmod 600 config/server.yaml
+            
+    - name: Start test containers
+      env:
+        WEB_SERVER_PORT: ${{ secrets.WEB_SERVER_PORT }}
+        REDIS_PORT: ${{ secrets.REDIS_PORT }}
+        RABBITMQ_PORT: ${{ secrets.RABBITMQ_PORT }}
+        RABBITMQ_PORT_WEB: ${{ secrets.RABBITMQ_PORT_WEB }}
+        RABBITMQ_USER: ${{ secrets.RABBITMQ_USER }}
+        RABBITMQ_PASSWORD: ${{ secrets.RABBITMQ_PASSWORD }}
+        POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+        POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+        POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+        POSTGRES_PORT: ${{ secrets.POSTGRES_PORT }}
+      run: make start-containers
+      
+    - name: Wait for services to be ready
+      env:
+        POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+        POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+        WEB_SERVER_PORT: ${{ secrets.WEB_SERVER_PORT }}
+      run: |
+        echo "🔍 Checking service status..."
+
+        echo "containers status:"
+        docker compose ps
+        
+        # Check PostgreSQL
+        echo "📊 Waiting for PostgreSQL..."
+        if timeout 60 bash -c 'until docker compose exec -T postgres pg_isready -U $POSTGRES_USER -d $POSTGRES_DB; do sleep 2; done'; then
+          echo "✅ PostgreSQL is ready"
+        else
+          echo "❌ PostgreSQL failed to start or is not responding"
+          echo "📋 PostgreSQL container status:"
+          docker compose ps postgres
+          echo "📋 PostgreSQL logs:"
+          docker compose logs postgres
+          exit 1
+        fi
+        
+        # Check Redis
+        echo "📊 Waiting for Redis..."
+        if timeout 60 bash -c 'until docker compose exec -T redis redis-cli ping; do sleep 2; done'; then
+          echo "✅ Redis is ready"
+        else
+          echo "❌ Redis failed to start or is not responding"
+          echo "📋 Redis container status:"
+          docker compose ps redis
+          echo "📋 Redis logs:"
+          docker compose logs redis
+          exit 1
+        fi
+        
+        # Check RabbitMQ
+        echo "📊 Waiting for RabbitMQ..."
+        if timeout 60 bash -c 'until docker compose exec -T rabbitmq rabbitmq-diagnostics -q ping; do sleep 2; done'; then
+          echo "✅ RabbitMQ is ready"
+        else
+          echo "❌ RabbitMQ failed to start or is not responding"
+          echo "📋 RabbitMQ container status:"
+          docker compose ps rabbitmq
+          echo "📋 RabbitMQ logs:"
+          docker compose logs rabbitmq
+          exit 1
+        fi
+        
+        # Check webserver (if it's running)
+        echo "📊 Waiting for webserver..."
+        if timeout 60 bash -c 'until curl -f http://localhost:${WEB_SERVER_PORT}/api/v0/health; do sleep 2; done'; then
+          echo "✅ Webserver is ready"
+        else
+          echo "❌ Webserver failed to start or is not responding"
+          echo "📋 Webserver container status:"
+          docker compose ps webserver
+          echo "📋 Webserver logs:"
+          docker compose logs webserver
+          echo "📋 All containers status:"
+          docker compose ps
+          exit 1
+        fi
+        
+        echo "🎉 All services are ready!"
+        
+    - name: Install migrate utility
+      run: |
+        curl -L https://github.com/golang-migrate/migrate/releases/latest/download/migrate.linux-amd64.tar.gz | tar xvz
+        sudo mv migrate /usr/local/bin/
+        migrate -version
+        
+    - name: Apply database migrations
+      env:
+        POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+        POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+        POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+        POSTGRES_HOST: localhost
+        POSTGRES_PORT: ${{ secrets.POSTGRES_PORT }}
+        MIGRATIONS_PATH: ${{ secrets.MIGRATIONS_PATH }}
+      run: |
+        if [ -d "migrations" ]; then
+          echo "🔍 Checking migrations directory structure..."
+          echo "📁 Contents of migrations directory:"
+          ls -la migrations/
+          
+          if [ -d "$MIGRATIONS_PATH" ]; then
+            echo "📁 Contents of $MIGRATIONS_PATH:"
+            ls -la "$MIGRATIONS_PATH"
+            
+            # Проверяем наличие up миграций
+            up_files=$(find "$MIGRATIONS_PATH" -name "*.up.sql" | wc -l)
+            if [ "$up_files" -eq 0 ]; then
+              echo "❌ No .up.sql files found in $MIGRATIONS_PATH"
+              echo "📁 Available files:"
+              ls -la "$MIGRATIONS_PATH"
+              exit 1
+            fi
+            
+            echo "🔄 Found $up_files up migration files"
+            echo "🔄 Applying migrations using migrate utility..."
+            
+            # Формируем строку подключения к PostgreSQL
+            DATABASE_URL="postgres://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB?sslmode=disable"
+            
+            # Применяем миграции
+            migrate -path "$MIGRATIONS_PATH" -database "$DATABASE_URL" up
+            
+            if [ $? -eq 0 ]; then
+              echo "🎉 All migrations applied successfully!"
+              echo "📊 Migration status:"
+              migrate -path "$MIGRATIONS_PATH" -database "$DATABASE_URL" version
+            else
+              echo "❌ Failed to apply migrations"
+              exit 1
+            fi
+          else
+            echo "❌ Migration directory $MIGRATIONS_PATH not found"
+            echo "📁 Available directories in migrations:"
+            find migrations -type d
+            exit 1
+          fi
+        else
+          echo "❌ No migrations directory found"
+          exit 1
+        fi
+      
+    - name: Stop containers
+      if: always()
+      run: make stop-containers
