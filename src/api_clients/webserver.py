@@ -21,3 +21,9 @@ class WebServerV0APIClient(WebServerAPIClient):
 
     def get_health(self) -> Response:
         return self.client.get("/api/v0/health")
+
+    def create_note(self, note: dict) -> Response:
+        return self.client.post(
+            "/api/v0/spaces/notes/create",
+            json=note,
+        )

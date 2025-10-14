@@ -13,5 +13,5 @@ fix:
 	uv run ruff check --select I --fix .
 	uv run ruff check --fix .
 
-run:
+test:
 	uv run python -m pytest . 
