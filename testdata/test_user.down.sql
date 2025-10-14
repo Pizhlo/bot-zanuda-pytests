@@ -1,0 +1,1 @@
+DELETE FROM users.users where id = '56279a7c-13a0-4464-98fe-8cee52bcd3b7';

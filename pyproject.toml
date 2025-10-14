@@ -22,3 +22,8 @@ dependencies = [
 [tool.ruff.lint]
 external = ["WPS"]
 ignore = ["E401"]
+
+[dependency-groups]
+dev = [
+    "types-pyyaml>=6.0.12.20260906",
+]

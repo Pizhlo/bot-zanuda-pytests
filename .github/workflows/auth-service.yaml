@@ -1,0 +1,53 @@
+name: Тесты auth-service
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      auth_image:
+        description: Образ auth-service для проверки; по умолчанию latest
+        type: string
+        default: pizhlo/bot-zanuda-auth-service:latest
+
+jobs:
+  auth-service:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      CI: 'true'
+      # Ручной запуск позволяет проверить тестовый тег без обновления latest.
+      AUTH_IMAGE: ${{ inputs.auth_image || 'pizhlo/bot-zanuda-auth-service:latest' }}
+      # Повторный запуск задания получает новый изолированный проект.
+      RUN_ID: auth-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Получить код и закреплённый testkit
+        uses: actions/checkout@v4
+        with:
+          # Один закреплённый коммит testkit для локального запуска и CI.
+          submodules: recursive
+          # Поддерживаем оба существующих имени токена для приватного сабмодуля.
+          token: ${{ secrets.CI_GITHUB_TOKEN || secrets.GH_TOKEN || github.token }}
+          persist-credentials: false
+      - name: Установить зависимость скрипта запуска
+        run: sudo apt-get update && sudo apt-get install -y python3-yaml
+      - name: Выполнить полный прогон тестов auth-service
+        run: make integration-run
+      # Дополнительная диагностика, если общий runner завершился раньше подготовки/уборки.
+      - name: Собрать оставшиеся логи
+        if: always()
+        run: |
+          if [ -f testkit/Makefile ]; then
+            make integration-logs
+          fi
+      # Отдельный always-шаг выполняется даже при ошибке сбора логов.
+      - name: Удалить оставшееся окружение
+        if: always()
+        run: |
+          if [ -f testkit/Makefile ]; then
+            make integration-down
+          fi

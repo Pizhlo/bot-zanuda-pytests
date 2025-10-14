@@ -43,7 +43,7 @@ make docker-login     # login to Docker registry
 - End-to-end tests for entire project (web server, auth service, bot)
 - Currently testing: web server and auth service
 - Future: bot tests
-- Tests run in isolated Docker environment
+- Auth-service environments use the pinned testkit (container or Linux native/host modes)
 - Each test suite has its own database schema
 
 ## Test Patterns
@@ -88,3 +88,18 @@ Before adding or changing a test scenario, fixture, API client, test environment
 2. If it is not described, propose adding it to `spec.md` before implementing the test.
 3. Keep test specifications, project constitution, and test code consistent.
 4. Not invent endpoint paths, authentication flows, status codes, token TTLs, or response fields without specification support.
+
+## Жизненный цикл тестового окружения auth-service
+
+Контракт окружения и загрузки данных описан в `specs/autotests/pipeline.md`.
+Для полного изолированного цикла используйте integration-run, для подготовки — integration-up.
+Команды seed/test/logs/down требуют явный RUN_ID.
+SQL остаются в testdata/auth-service; tools/seed_auth.py напрямую вызывает migrate v4.19.1
+с историей testdata_schema_migrations, отдельной от истории схемы приложения.
+Автоматически сбрасывать dirty через force запрещено.
+PYTEST_CONFIG выбирает сгенерированный YAML. Локальный запуск собирает текущие тесты и SQL.
+Make-команда авторизации отключает автоматические отчёты Allure; остальные наборы сохраняют настройки.
+Полная локальная ошибка сохраняет окружение и текстовые логи; успех удаляет их.
+CI всегда собирает логи перед попыткой уборки. Ручные тесты требуют ручного down.
+Одноразовые тестовые реквизиты testkit допустимы; настоящие секреты по-прежнему запрещены.
+Не меняйте отдельный workflow webserver.

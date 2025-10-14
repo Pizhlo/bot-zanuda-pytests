@@ -2,6 +2,8 @@
 Конфигурация для тестов
 """
 
+import os
+
 from pydantic import AnyUrl, Field
 from pydantic_settings import (
     BaseSettings,
@@ -95,7 +97,8 @@ class Config(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-        return (YamlConfigSettingsSource(settings_cls),)
+        """Загружает YAML текущего прогона из PYTEST_CONFIG либо локальный config.yaml."""
+        return (YamlConfigSettingsSource(settings_cls, yaml_file=os.environ.get("PYTEST_CONFIG", "config.yaml")),)
 
 
 # Глобальный экземпляр конфигурации

@@ -3,3 +3,10 @@
 .ruff_cache/
 .venv
 __pycache__
+.git
+.env
+.env.*
+config.yaml
+testkit
+.logs
+.testkit-runs/

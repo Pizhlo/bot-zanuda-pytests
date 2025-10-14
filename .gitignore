@@ -78,4 +78,12 @@ Thumbs.db
 config.yaml
 config.yml
 
+# для локального запуска
 .env
+*.yaml
+configs/*
+.testkit-runs/
+.logs/
+
+# Versioned CI definitions
+!.github/workflows/*.yaml
