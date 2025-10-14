@@ -12,10 +12,12 @@ jobs:
         - uses: actions/setup-python@v5
           with:
             python-version: '3.13'
-            
+
         - name: Install linters
           run: make install
 
         - name: Run linters
           run: make lint
-    
+
+        - name: Проверить загрузчик тестовых данных
+          run: make test-seed

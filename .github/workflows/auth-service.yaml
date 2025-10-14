@@ -1,0 +1,91 @@
+name: Тесты
+
+on:
+  push:
+    branches: [main, develop]
+    # Один список для push и PR: тесты auth-service и влияющие на них зависимости.
+    # При новой общей зависимости добавьте её сюда. Документация и tests/webserver не входят.
+    paths: &auth_service_paths
+      - 'tests/auth_service/**'
+      - 'tests/fixtures/**'
+      - 'tests/conftest.py'
+      - 'tests/__init__.py'
+      - 'conftest.py'
+      - 'src/**'
+      - 'utils/**'
+      - 'testdata/auth-service/**'
+      - 'tools/seed_auth.py'
+      - 'tools/__init__.py'
+      # Смена версии сабмодуля меняет gitlink testkit, а не файлы внутри каталога.
+      - 'testkit'
+      - '.gitmodules'
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'Makefile'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.python-version'
+      - 'pytest.ini'
+      - 'setup.cfg'
+      - '.github/workflows/auth-service.yaml'
+  pull_request:
+    branches: [main, develop]
+    # *auth_service_paths повторно использует список выше; проверяется весь diff PR.
+    paths: *auth_service_paths
+  workflow_dispatch:
+    inputs:
+      auth_image:
+        description: Полная ссылка на образ auth-service; пустое значение использует Secrets и latest
+        type: string
+
+jobs:
+  auth-service:
+    # Fork PR не получает Secrets и доступ к приватному testkit: пропускаем до checkout.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      CI: 'true'
+      # Ручной запуск позволяет проверить тестовый тег без обновления latest.
+      AUTH_IMAGE_REPOSITORY: ${{ secrets.AUTH_SERVICE_IMAGE_REPOSITORY }}
+      AUTH_IMAGE: ${{ inputs.auth_image || format('{0}:latest', secrets.AUTH_SERVICE_IMAGE_REPOSITORY) }}
+      # Повторный запуск задания получает новый изолированный проект.
+      RUN_ID: auth-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Получить код и закреплённый testkit
+        uses: actions/checkout@v4
+        with:
+          # Один закреплённый коммит testkit для локального запуска и CI.
+          submodules: recursive
+          # Поддерживаем оба существующих имени токена для приватного сабмодуля.
+          token: ${{ secrets.CI_GITHUB_TOKEN || secrets.GH_TOKEN || github.token }}
+          persist-credentials: false
+      # Пустой secret не должен незаметно включать локальный адрес образа по умолчанию.
+      - name: Проверить настройку образа
+        env:
+          AUTH_IMAGE_OVERRIDE: ${{ inputs.auth_image }}
+        run: |
+          if [ -z "$AUTH_IMAGE_OVERRIDE" ] && [ -z "$AUTH_IMAGE_REPOSITORY" ]; then
+            echo "::error::Добавьте Actions secret AUTH_SERVICE_IMAGE_REPOSITORY (репозиторий образа без тега)."
+            exit 1
+          fi
+      - name: Установить зависимость скрипта запуска
+        run: sudo apt-get update && sudo apt-get install -y python3-yaml
+      - name: Выполнить полный прогон тестов auth-service
+        run: make integration-run
+      # Дополнительная диагностика, если общий runner завершился раньше подготовки/уборки.
+      - name: Собрать оставшиеся логи
+        if: always()
+        run: |
+          if [ -f testkit/Makefile ]; then
+            make integration-logs
+          fi
+      # Отдельный always-шаг выполняется даже при ошибке сбора логов.
+      - name: Удалить оставшееся окружение
+        if: always()
+        run: |
+          if [ -f testkit/Makefile ]; then
+            make integration-down
+          fi
