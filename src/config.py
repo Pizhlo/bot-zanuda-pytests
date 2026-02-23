@@ -24,6 +24,13 @@ class WebServerConfig(BaseSettings):
     base_url: AnyUrl = Field(default=AnyUrl("http://localhost:8080"))
     timeout: int = Field(default=API_TIMEOUT)
 
+class AuthServiceConfig(BaseSettings):
+    """Конфигурация для сервиса авторизации"""
+
+    base_url: AnyUrl = Field(default=AnyUrl("http://localhost:8080"))
+    timeout: int = Field(default=API_TIMEOUT)
+    secret_key: str = Field()
+
 
 class RabbitMQConfig(BaseSettings):
     """Конфигурация для RabbitMQ"""
@@ -46,6 +53,7 @@ class Config(BaseSettings):
     # Базовые настройки
     webserver: WebServerConfig = Field(default_factory=WebServerConfig)
     rabbitmq: RabbitMQConfig = Field(default_factory=RabbitMQConfig)
+    auth_service: AuthServiceConfig
 
     model_config = SettingsConfigDict(
         yaml_file="config.yaml", env_file_encoding="utf-8", extra="ignore"
@@ -64,4 +72,4 @@ class Config(BaseSettings):
 
 
 # Глобальный экземпляр конфигурации
-config = Config()
+config = Config()  # type: ignore[call-arg]

@@ -16,3 +16,5 @@ dependencies = [
     "wemake-python-styleguide>=1.4.0",
     "pika>=1.3.2",
 ]
+[tool.ruff.lint]
+external = ["WPS"]

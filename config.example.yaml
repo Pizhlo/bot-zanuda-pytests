@@ -8,3 +8,8 @@ rabbitmq:
   username: guest
   password: guest
   virtual_host: /
+
+auth_service:
+  base_url: http://localhost:8080
+  timeout: 30
+  secret_key: key
