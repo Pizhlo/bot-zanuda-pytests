@@ -36,3 +36,24 @@ test-auth-service:
 	uv run python -m pytest tests/auth_service
 
 .PHONY: test-auth-service
+
+# DOCKER
+
+-include .env
+# Настройки по умолчанию, можно переопределять через env
+REGISTRY ?= docker.io
+IMAGE_TAG ?= latest                   # или $(shell git rev-parse --short HEAD)
+FULL_IMAGE := $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)
+
+.PHONY: docker-build docker-push docker-login
+
+docker-build:
+	docker build -f Dockerfile -t $(FULL_IMAGE) .
+
+docker-push:
+	docker push $(FULL_IMAGE)
+
+# Опционально: логин, чтобы не писать руками
+docker-login:
+	@echo "Logging in to $(REGISTRY)..."
+	docker login $(REGISTRY)
