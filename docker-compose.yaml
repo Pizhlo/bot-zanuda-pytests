@@ -42,7 +42,7 @@ services:
       - backend 
 
   postgres:
-    image: postgres:latest
+    image: postgres:17
     container_name: postgres
     restart: always
     environment:

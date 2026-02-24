@@ -31,3 +31,8 @@ clean-containers:
 	docker compose rm -f
 
 .PHONY: install lint fix start-containers test stop-containers restart-containers clean-containers
+
+test-auth-service:
+	uv run python -m pytest tests/auth_service
+
+.PHONY: test-auth-service
