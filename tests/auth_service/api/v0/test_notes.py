@@ -19,9 +19,12 @@ CAN_EDIT_FIELD = "can_edit"
 ONE_HOUR_SECONDS = int(timedelta(hours=1).total_seconds())
 
 # ID LISTS
-MAX_ID = 1000 # максимальнай айди заметки. на самом деле может быть любым, но для тестов я взяла такой.
-BIG_LIST_WITHOUT_EXISTING_NOTES = list[int](range(4, MAX_ID))  # детерминированный список без 1, 2, 3
+MAX_NOTE_ID = 1000 # максимальнай айди заметки. на самом деле может быть любым, но для тестов я взяла такой.
+BIG_LIST_WITHOUT_EXISTING_NOTES = list[int](range(4, MAX_NOTE_ID))  # детерминированный список без 1, 2, 3
 BIG_LIST_WITH_EXISTING_NOTES = BIG_LIST_WITHOUT_EXISTING_NOTES + [1, 2, 3]
+
+# детерминированный пользователь, которого нет в базе фикстур
+NON_MEMBER_USER_ID = 10_000_000
 
 
 @dataclass(frozen=True)
@@ -97,6 +100,16 @@ class TestAuthServiceV0Notes:
                 ),
                 id="note_ids is empty",
             ),
+             pytest.param(
+                FilterNotesCase(
+                    token_fields=TokenFields(user_id=NON_MEMBER_USER_ID, exp_offset=ONE_HOUR_SECONDS),
+                    body={NOTE_IDS_FIELD: [1, 2, 3], SPACE_ID_FIELD: 1},
+                    expected_status_code=httpx.codes.FORBIDDEN,
+                    expected_response=None,
+                    expected_message="user is not member",
+                ),
+                id="user is not member",
+            ),
             pytest.param(
                 FilterNotesCase(
                     token_fields=TokenFields(user_id=1, exp_offset=ONE_HOUR_SECONDS),
@@ -168,6 +181,38 @@ class TestAuthServiceV0Notes:
                 ),
                 id="valid request: generated 1000 IDs",
             ),
+            pytest.param(
+                FilterNotesCase(
+                    token_fields=TokenFields(user_id=2, exp_offset=ONE_HOUR_SECONDS),
+                    body={NOTE_IDS_FIELD: [4, 5, 6], SPACE_ID_FIELD: 2},
+                    expected_status_code=httpx.codes.OK,
+                    expected_response={
+                        NOTES_FIELD: {
+                            "4": {CAN_READ_FIELD: True, CAN_EDIT_FIELD: True},
+                            "5": {CAN_READ_FIELD: True, CAN_EDIT_FIELD: True},
+                            "6": {CAN_READ_FIELD: True, CAN_EDIT_FIELD: True},
+                        }
+                    },
+                    expected_message=None,
+                ),
+                id="user=EDITOR, notes=SPACE (only existing notes)",
+            ),
+            pytest.param(
+                FilterNotesCase(
+                    token_fields=TokenFields(user_id=2, exp_offset=ONE_HOUR_SECONDS),
+                    body={NOTE_IDS_FIELD: BIG_LIST_WITH_EXISTING_NOTES, SPACE_ID_FIELD: 2},
+                    expected_status_code=httpx.codes.OK,
+                    expected_response={
+                        NOTES_FIELD: {
+                            "4": {CAN_READ_FIELD: True, CAN_EDIT_FIELD: True},
+                            "5": {CAN_READ_FIELD: True, CAN_EDIT_FIELD: True},
+                            "6": {CAN_READ_FIELD: True, CAN_EDIT_FIELD: True},
+                        }
+                    },
+                    expected_message=None,
+                ),
+                id="user=EDITOR, notes=SPACE (existing notes+not existing)",
+            ),
         ],
     )
     def test_filter_notes(
@@ -183,11 +228,14 @@ class TestAuthServiceV0Notes:
         - В токене нет user_id - 401
         - space_id < 1 - 400
         - не указаны note_ids - 400
+        - пользователь не участвует в пространстве - 403
         - валидный запрос с заметками которые существуют - 200 + список айди из запроса
         - валидный запрос с заметками которые существуют + которые не существуют - 200 + список которые существуют
         - валидный запрос только с заметками которых нет - 200 + пустой список
         - валидный запрос с большим количеством айди заметок (существуют + не существуют) - 200 + список из тех которые существуют
         - валидный запрос с большим количеством айди заметок (не существуют) - 200 + пустой список
+        - пользователь - EDITOR, получить все SPACE заметки (только существующие: [4, 5, 6])
+        - пользователь - EDITOR, получить все SPACE заметки (существующие + рандомные: [4, 5, 6, ...])
         """
         token: str | None = None
         token_fields = case.token_fields
