@@ -40,7 +40,7 @@ def _jwt_hs256(payload: dict[str, Any], secret: str) -> str:
 def make_jwt_token(
     *,
     secret_key: str,
-    user_id: int | None = None,
+    user_id: str | None = None,
     exp: int | datetime | None = None,
 ) -> str:
     """
