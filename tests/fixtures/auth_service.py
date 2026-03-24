@@ -1,70 +1,22 @@
-import base64
-import hashlib
-import hmac
-import json
 from collections.abc import Callable
-from datetime import datetime, timezone
 from functools import partial
-from typing import Any
+
+import pytest
 
 from src.api_clients.auth_service import AuthServiceAPIClient, AuthServiceV0APIClient
 from src.config import config
-import pytest
+from tests.fixtures.auth_jwt import make_jwt_token
 
 
-_JWT_HEADER_JSON = b'{"alg":"HS256","typ":"JWT"}'
+def wrong_client_secret_for_login(_client_id: str) -> str:
+    """Секрет, заведомо не совпадающий с Vault/БД (негативные тесты login)."""
+    return "__pytest_invalid_client_secret__"
 
 
-def _base64url(raw: bytes) -> str:
-    """Кодирует байты в base64url без паддинга."""
-    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
-
-
-def _jwt_hs256(payload: dict[str, Any], secret: str) -> str:
-    """Собирает и подписывает JWT токен с алгоритмом HS256."""
-    header_part = _base64url(_JWT_HEADER_JSON)
-    payload_json = json.dumps(
-        payload,
-        separators=(",", ":"),
-        sort_keys=True,
-    ).encode()
-    payload_part = _base64url(payload_json)
-
-    signing_input = f"{header_part}.{payload_part}".encode()
-    signature_part = _base64url(
-        hmac.new(secret.encode(), signing_input, hashlib.sha256).digest(),
-    )
-    return f"{header_part}.{payload_part}.{signature_part}"
-
-
-def make_jwt_token(
-    *,
-    secret_key: str,
-    user_id: str | None = None,
-    exp: int | datetime | None = None,
-) -> str:
-    """
-    Генерирует JWT токен для сервиса авторизации.
-
-    Поля добавляются в payload только если переданы:
-    - user_id — идентификатор пользователя;
-    - exp — unix-время истечения (int) или datetime.
-    """
-    payload: dict[str, object] = {}
-
-    if user_id is not None:
-        payload["user_id"] = user_id
-
-    if exp is not None:
-        if isinstance(exp, datetime):
-            exp_dt = exp
-            if exp_dt.tzinfo is None:
-                exp_dt = exp_dt.replace(tzinfo=timezone.utc)
-            payload["exp"] = int(exp_dt.timestamp())
-        else:
-            payload["exp"] = exp
-
-    return _jwt_hs256(payload=payload, secret=secret_key)
+@pytest.fixture()
+def wrong_client_secret() -> Callable[[str], str]:
+    """Возвращает функцию с неверным client_secret для подстановки в запрос."""
+    return wrong_client_secret_for_login
 
 
 @pytest.fixture()
