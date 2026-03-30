@@ -1,3 +1,5 @@
+from typing import Any
+
 from httpx import Response
 
 from src.api_clients.base import APIClient
@@ -30,3 +32,6 @@ class AuthServiceV0APIClient(AuthServiceAPIClient):
         if body is not None:
             kwargs["json"] = body
         return self.client.post("/api/v0/auth/notes/filter", **kwargs)
+
+    def login(self, req: dict[str, Any] | None) -> Response:
+        return self.client.post("/api/v0/auth/login", json=req)

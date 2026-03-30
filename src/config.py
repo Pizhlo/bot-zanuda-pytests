@@ -12,6 +12,7 @@ from pydantic_settings import (
 
 API_TIMEOUT = 30
 RABBITMQ_DEFAULT_PORT = 5672
+DEFAULT_POSTGRES_PORT = 5432
 DEFAULT_HEARTBEAT = 300
 DEFAULT_BLOCKED_CONNECTION_TIMEOUT = 300
 DEFAULT_CONNECTION_ATTEMPTS = 3
@@ -47,12 +48,35 @@ class RabbitMQConfig(BaseSettings):
     connection_attempts: int = Field(default=DEFAULT_CONNECTION_ATTEMPTS)
     retry_delay: int = Field(default=DEFAULT_RETRY_DELAY)
 
+
+class VaultConfig(BaseSettings):
+    """Конфигурация для HashiCorp Vault."""
+
+    base_url: AnyUrl = Field(default=AnyUrl("http://localhost:8200"))
+    token: str = Field(default="root")
+    timeout: int = Field(default=API_TIMEOUT)
+    mount_point: str = Field(default="secret")
+    auth_clients_path: str = Field(default="auth/clients")
+
+
+class PostgresConfig(BaseSettings):
+    """Конфигурация для PostgreSQL."""
+
+    host: str = Field(default="localhost")
+    port: int = Field(default=DEFAULT_POSTGRES_PORT)
+    user: str = Field(default="postgres")
+    password: str = Field(default="postgres")
+    dbname: str = Field(default="postgres")
+
+
 class Config(BaseSettings):
     """Конфигурация для тестов"""
 
     # Базовые настройки
     webserver: WebServerConfig = Field(default_factory=WebServerConfig)
     rabbitmq: RabbitMQConfig = Field(default_factory=RabbitMQConfig)
+    vault: VaultConfig = Field(default_factory=VaultConfig)
+    postgres: PostgresConfig = Field(default_factory=PostgresConfig)
     auth_service: AuthServiceConfig
 
     model_config = SettingsConfigDict(
