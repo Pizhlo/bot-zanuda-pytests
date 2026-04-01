@@ -4,14 +4,10 @@ from collections.abc import Generator
 from contextlib import contextmanager
 import logging
 
-import httpx
-
 from src.storages.postgres_client import PostgresClient
 from tests.fixtures.postgres import SqlExecuter
 
 logger = logging.getLogger(__name__)
-
-_RESPONSE_ERROR_FIELD = "error"
 
 
 @contextmanager
@@ -36,12 +32,3 @@ def postgres_sql_migration(
     finally:
         if executer is not None:
             executer.downgrade()
-
-
-def log_internal_server_error(response: httpx.Response) -> None:
-    """Пишет warning, если ответ сервера — 500."""
-    if response.status_code == httpx.codes.INTERNAL_SERVER_ERROR:
-        logger.warning(
-            "internal server error: %s",
-            response.json()[_RESPONSE_ERROR_FIELD],
-        )

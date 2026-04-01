@@ -23,11 +23,20 @@ class AuthServiceV0APIClient(AuthServiceAPIClient):
     def get_health(self) -> Response:
         return self.client.get("/api/v0/health")
 
-    def filter_notes(self, token: str | None = None, body: dict | None = None) -> Response:
-        kwargs: dict = {}
+    def filter_notes(self, 
+    token: str | None = None, 
+    body: dict | None = None, 
+    x_telegram_user_id: int | None = None) -> Response:
+        """
+        Фильтрует заметки по заданным параметрам.
+        """
+        kwargs: dict = {"headers": {}}
 
         if token is not None:
-            kwargs["headers"]= {"Authorization": f"Bearer {token}"}
+            kwargs["headers"]["Authorization"] = f"Bearer {token}"
+
+        if x_telegram_user_id is not None:
+            kwargs["headers"]["X-Telegram-User-Id"] = str(x_telegram_user_id)
 
         if body is not None:
             kwargs["json"] = body

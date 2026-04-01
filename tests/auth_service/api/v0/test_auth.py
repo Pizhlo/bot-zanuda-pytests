@@ -1,38 +1,38 @@
 from collections.abc import Callable
 from typing import Any
-import httpx
-import pytest
+
+import httpx, logging, pytest  # noqa: E401
 
 from src.api_clients.auth_service import AuthServiceV0APIClient
+from src.common.server_error_logging import log_internal_server_error
 from src.storages.postgres_client import PostgresClient
-from tests.auth_service.api.v0.auth_login_support import (
-    log_internal_server_error,
-    postgres_sql_migration,
-)
+from tests.auth_service.api.v0.auth_login_support import postgres_sql_migration
 from tests.fixtures.auth_jwt import check_token_fields
 from tests.fixtures.vault import LoginSecretBundle
 
-# FIELDS
-ERROR_FIELD = "error"
-TOKEN_TYPE_FIELD = "token_type"
-EXPIRES_IN_FIELD = "expires_in"
-SCOPE_FIELD = "scope"
-TOKEN_PAYLOAD_FIELD = "token_payload"
+from src.common.fields import (
+    CLIENT_ID_BOT,
+    ERROR_FIELD,
+    EXPIRES_IN_FIELD,
+    GRANT_TYPE_CLIENT_CREDENTIALS,
+    SCOPE_BOT,
+    SCOPE_FIELD,
+    SUBJECT_BOT,
+    TOKEN_TYPE_FIELD,
+)
+from src.common.fields import (
+    NO_VAULT_SECRET_BUNDLE,
+    TOKEN_PAYLOAD_FIELD,
+    VAULT_SECRET_BUNDLE,
+    WRONG_SECRET_BUNDLE,
+)
+from src.common.errors import (
+    INVALID_GRANT_TYPE_ERROR,
+    INVALID_CLIENT_ERROR,
+    INACTIVE_CLIENT_ERROR,
+)
 
-# AUTH FIELDS
-GRANT_TYPE_CLIENT_CREDENTIALS = "client_credentials"
-CLIENT_ID_BOT = "bot"
-SCOPE_BOT = "bot"
-SUBJECT_BOT = "bot"
-
-INVALID_GRANT_TYPE_ERROR = "invalid grant type"
-INVALID_CLIENT_ERROR = "invalid client"
-INACTIVE_CLIENT_ERROR = "inactive client"
-
-# VAULT BUNDLES
-VAULT_SECRET_BUNDLE = "vault"
-WRONG_SECRET_BUNDLE = "wrong"
-NO_VAULT_SECRET_BUNDLE = "no_vault"
+logger = logging.getLogger(__name__)
 
 class TestAuthServiceV0Login:
     """Тесты для проверки авторизации"""
@@ -121,7 +121,7 @@ class TestAuthServiceV0Login:
 
             response = auth_service_v0_api_client.login(req)
 
-            log_internal_server_error(response)
+            log_internal_server_error(response, logger, ERROR_FIELD)
 
             assert expected_status_code == response.status_code
             response_data = response.json()
@@ -269,7 +269,7 @@ class TestAuthServiceV0Login:
             with login_secret_bundle.around_login(client_id):
                 response = auth_service_v0_api_client.login(req)
 
-            log_internal_server_error(response)
+            log_internal_server_error(response, logger, ERROR_FIELD)
 
             assert expected_status_code == response.status_code
             assert expected_message == response.json()[ERROR_FIELD]
@@ -316,7 +316,7 @@ class TestAuthServiceV0Login:
         """
         response = auth_service_v0_api_client.login(body)
 
-        log_internal_server_error(response)
+        log_internal_server_error(response, logger, ERROR_FIELD)
 
         assert expected_status_code == response.status_code
         assert expected_message == response.json()[ERROR_FIELD]
