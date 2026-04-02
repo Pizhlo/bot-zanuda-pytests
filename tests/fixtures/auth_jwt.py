@@ -5,8 +5,8 @@ import hashlib
 import hmac
 import json
 import time
-from datetime import datetime, timezone
 from typing import Any
+from dataclasses import dataclass
 
 import jwt
 
@@ -35,12 +35,27 @@ def _jwt_hs256(payload: dict[str, Any], secret: str) -> str:
     )
     return f"{header_part}.{payload_part}.{signature_part}"
 
+@dataclass(frozen=True)
+class TokenFields:
+    """Параметры, из которых собирается payload токена."""
+    sub: str | None = None # кто получил токен (bot)
+    aud: list[str] | None = None # audience
+    iss: str | None = None # issuer
+    iat: int | None = None # issued at
+    exp: int | None = None # expires at
+    scope: str | None = None # scope
+
+_sub_field = "sub"
+_aud_field = "aud"
+_iss_field = "iss"
+_iat_field = "iat"
+_exp_field = "exp"
+_scope_field = "scope"
 
 def make_jwt_token(
     *,
     secret_key: str,
-    user_id: str | None = None,
-    exp: int | datetime | None = None,
+    token_fields: TokenFields,
 ) -> str:
     """
     Генерирует JWT токен для сервиса авторизации.
@@ -51,17 +66,23 @@ def make_jwt_token(
     """
     payload: dict[str, object] = {}
 
-    if user_id is not None:
-        payload["user_id"] = user_id
+    if token_fields.sub is not None:
+        payload[_sub_field] = token_fields.sub
 
-    if exp is not None:
-        if isinstance(exp, datetime):
-            exp_dt = exp
-            if exp_dt.tzinfo is None:
-                exp_dt = exp_dt.replace(tzinfo=timezone.utc)
-            payload["exp"] = int(exp_dt.timestamp())
-        else:
-            payload["exp"] = exp
+    if token_fields.exp is not None:
+        payload[_exp_field] = token_fields.exp
+
+    if token_fields.aud is not None:
+        payload[_aud_field] = token_fields.aud
+
+    if token_fields.iss is not None:
+        payload[_iss_field] = token_fields.iss
+
+    if token_fields.iat is not None:
+        payload[_iat_field] = token_fields.iat
+
+    if token_fields.scope is not None:
+        payload[_scope_field] = token_fields.scope
 
     return _jwt_hs256(payload=payload, secret=secret_key)
 
@@ -73,7 +94,7 @@ def assert_iat_recent(
 ) -> None:
     """Проверяет, что iat не слишком давно относительно текущего времени."""
     now = time.time()
-    iat = payload.get("iat")
+    iat = payload.get(_iat_field)
     
     assert iat is not None, "payload does not contain 'iat' field"
     assert abs(now - iat) <= tolerance_sec, f"iat={iat} too far from now={now}"
@@ -91,7 +112,7 @@ def check_token_fields(token: str, expected_fields: dict[str, Any]) -> None:
         assert payload[field_name] == expected_value
 
     if expected_expires_in is not None:
-        assert payload["exp"] - payload["iat"] == expected_expires_in
+        assert payload[_exp_field] - payload[_iat_field] == expected_expires_in
 
-    if "iat" in payload:
+    if _iat_field in payload:
        assert_iat_recent(payload, tolerance_sec=_DEFAULT_IAT_TOLERANCE_SEC)
