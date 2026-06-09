@@ -26,7 +26,7 @@ class AuthServiceV0APIClient(AuthServiceAPIClient):
     def filter_notes(self, 
     token: str | None = None, 
     body: dict | None = None, 
-    x_telegram_user_id: int | None = None) -> Response:
+    x_telegram_user_id: str | None = None) -> Response:
         """
         Фильтрует заметки по заданным параметрам.
         """
@@ -36,7 +36,7 @@ class AuthServiceV0APIClient(AuthServiceAPIClient):
             kwargs["headers"]["Authorization"] = f"Bearer {token}"
 
         if x_telegram_user_id is not None:
-            kwargs["headers"]["X-Telegram-User-Id"] = str(x_telegram_user_id)
+            kwargs["headers"]["X-Telegram-User-Id"] = x_telegram_user_id
 
         if body is not None:
             kwargs["json"] = body

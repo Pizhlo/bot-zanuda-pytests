@@ -1,12 +1,18 @@
 # FIELDS
 ERROR_FIELD = "error"
+MESSAGE_FIELD = "message"
 TOKEN_TYPE_FIELD = "token_type"
 EXPIRES_IN_FIELD = "expires_in"
 SCOPE_FIELD = "scope"
+USER_AGENT_FIELD = "user_agent"
+USER_ID_FIELD = "user_id"
+GRANT_TYPE_FIELD = "grant_type"
+CLIENT_ID_FIELD = "client_id"
 TOKEN_PAYLOAD_FIELD = "token_payload"
 
 # AUTH FIELDS
 GRANT_TYPE_CLIENT_CREDENTIALS = "client_credentials"
+GRANT_TYPE_PASSWORD = "password"
 CLIENT_ID_BOT = "bot"
 SCOPE_BOT = "bot"
 SCOPE_ADMIN = "admin"

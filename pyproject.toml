@@ -21,3 +21,4 @@ dependencies = [
 ]
 [tool.ruff.lint]
 external = ["WPS"]
+ignore = ["E401"]
