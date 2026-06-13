@@ -33,6 +33,9 @@ class AuthServiceConfig(BaseSettings):
     secret_key: str = Field()
 
 
+_DEFAULT_QUEUE_POLL_INTERVAL_SEC = 0.1
+_DEFAULT_QUEUE_POLL_ATTEMPTS = 30
+
 class RabbitMQConfig(BaseSettings):
     """Конфигурация для RabbitMQ"""
 
@@ -48,6 +51,8 @@ class RabbitMQConfig(BaseSettings):
     connection_attempts: int = Field(default=DEFAULT_CONNECTION_ATTEMPTS)
     retry_delay: int = Field(default=DEFAULT_RETRY_DELAY)
     auth_service_error_queue: str = Field(default="errors.auth-service")
+    poll_interval_sec: float = Field(default=_DEFAULT_QUEUE_POLL_INTERVAL_SEC)
+    queue_poll_attempts: int = Field(default=_DEFAULT_QUEUE_POLL_ATTEMPTS)
 
 
 class VaultConfig(BaseSettings):
