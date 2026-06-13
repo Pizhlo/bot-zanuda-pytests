@@ -1,4 +1,5 @@
 import logging
+import time
 from contextlib import contextmanager
 from typing import ContextManager, Generator, Optional
 
@@ -9,7 +10,6 @@ from src.brokers.rabbitmq import RabbitMQ
 from src.config import config
 
 logger = logging.getLogger(__name__)
-
 
 @pytest.fixture(scope="session")
 def rabbitmq() -> Generator[RabbitMQ, None, None]:
@@ -27,27 +27,30 @@ def _get_messages_from_queue(
     channel = rabbitmq.connection.channel()
 
     try:
-        yield _get_single_message(channel, queue_name)
+        yield _get_single_message(channel, queue_name, rabbitmq.config.poll_interval_sec, rabbitmq.config.queue_poll_attempts)
     finally:
         if channel and not channel.is_closed:
             channel.close()
 
 
 def _get_single_message(
-    channel: pika.channel.Channel, queue_name: str
+    channel: pika.channel.Channel, queue_name: str, poll_interval_sec: float, queue_poll_attempts: int
 ) -> Optional[bytes]:
-    """Получает одно сообщение из очереди"""
-    # Получаем одно сообщение без блокировки из существующей очереди
-    method_frame, _header_frame, body = channel.basic_get(
-        queue=queue_name, auto_ack=True
-    )
+    """Получает одно сообщение из очереди, ожидая публикации из auth-service."""
+    for attempt in range(queue_poll_attempts):
+        method_frame, _header_frame, body = channel.basic_get(
+            queue=queue_name, auto_ack=True
+        )
 
-    if method_frame:
-        logger.info("Received message: %s", body)
-        return body if isinstance(body, bytes) else None
-    else:
-        logger.info("No messages in queue")
-        return None
+        if method_frame:
+            logger.info("Received message: %s", body)
+            return body if isinstance(body, bytes) else None
+
+        if attempt < queue_poll_attempts - 1:
+            time.sleep(poll_interval_sec)
+
+    logger.info("No messages in queue")
+    return None
 
 
 @pytest.fixture(scope="function")
