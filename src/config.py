@@ -47,6 +47,7 @@ class RabbitMQConfig(BaseSettings):
     blocked_connection_timeout: int = Field(default=DEFAULT_BLOCKED_CONNECTION_TIMEOUT)
     connection_attempts: int = Field(default=DEFAULT_CONNECTION_ATTEMPTS)
     retry_delay: int = Field(default=DEFAULT_RETRY_DELAY)
+    auth_service_error_queue: str = Field(default="errors.auth-service")
 
 
 class VaultConfig(BaseSettings):

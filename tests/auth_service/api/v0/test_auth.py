@@ -1,7 +1,7 @@
 from collections.abc import Callable
-from typing import Any
+from typing import Any, ContextManager, Optional
 
-import httpx, logging, pytest  # noqa: E401
+import httpx, logging, pytest
 
 from src.api_clients.auth_service import AuthServiceV0APIClient
 from src.common.server_error_logging import log_internal_server_error
@@ -9,28 +9,7 @@ from src.storages.postgres_client import PostgresClient
 from tests.auth_service.api.v0.auth_login_support import postgres_sql_migration
 from tests.fixtures.auth_jwt import check_token_fields
 from tests.fixtures.vault import LoginSecretBundle
-
-from src.common.fields import (
-    CLIENT_ID_BOT,
-    ERROR_FIELD,
-    EXPIRES_IN_FIELD,
-    GRANT_TYPE_CLIENT_CREDENTIALS,
-    SCOPE_BOT,
-    SCOPE_FIELD,
-    SUBJECT_BOT,
-    TOKEN_TYPE_FIELD,
-)
-from src.common.fields import (
-    NO_VAULT_SECRET_BUNDLE,
-    TOKEN_PAYLOAD_FIELD,
-    VAULT_SECRET_BUNDLE,
-    WRONG_SECRET_BUNDLE,
-)
-from src.common.errors import (
-    INVALID_GRANT_TYPE_ERROR,
-    INVALID_CLIENT_ERROR,
-    INACTIVE_CLIENT_ERROR,
-)
+from src.common import fields, errors as common_errors, audit
 
 logger = logging.getLogger(__name__)
 
@@ -42,16 +21,16 @@ class TestAuthServiceV0Login:
         [
             pytest.param(
                 dict[str, str](
-                    grant_type=GRANT_TYPE_CLIENT_CREDENTIALS,
-                    client_id=CLIENT_ID_BOT,
+                    grant_type=fields.GRANT_TYPE_CLIENT_CREDENTIALS,
+                    client_id=fields.CLIENT_ID_BOT,
                     client_secret="",
-                    scope=SCOPE_BOT,
+                    scope=fields.SCOPE_BOT,
                 ),
                 {
-                    TOKEN_TYPE_FIELD: "Bearer",
-                    EXPIRES_IN_FIELD: 3600,
-                    SCOPE_FIELD: SCOPE_BOT,
-                    TOKEN_PAYLOAD_FIELD: {"iss": "zanuda-auth-service", "sub": SUBJECT_BOT, "aud": ["zanuda-internal-api"], EXPIRES_IN_FIELD: 3600},
+                    fields.TOKEN_TYPE_FIELD: "Bearer",
+                    fields.EXPIRES_IN_FIELD: 3600,
+                    fields.SCOPE_FIELD: fields.SCOPE_BOT,
+                    fields.TOKEN_PAYLOAD_FIELD: {"iss": "zanuda-auth-service", "sub": fields.SUBJECT_BOT, "aud": ["zanuda-internal-api"], fields.EXPIRES_IN_FIELD: 3600},
                 },
                 None,
                 None,
@@ -60,16 +39,16 @@ class TestAuthServiceV0Login:
             ),
             pytest.param(
                 dict[str, str](
-                    grant_type=GRANT_TYPE_CLIENT_CREDENTIALS,
-                    client_id=CLIENT_ID_BOT,
+                    grant_type=fields.GRANT_TYPE_CLIENT_CREDENTIALS,
+                    client_id=fields.CLIENT_ID_BOT,
                     client_secret="",
-                    scope=SCOPE_BOT,
+                    scope=fields.SCOPE_BOT,
                 ),
                 {
-                    TOKEN_TYPE_FIELD: "Bearer", 
-                    EXPIRES_IN_FIELD: 3600,
-                    SCOPE_FIELD: SCOPE_BOT,
-                    TOKEN_PAYLOAD_FIELD: {"iss": "zanuda-auth-service", "sub": SUBJECT_BOT, "aud": ["zanuda-internal-api"], EXPIRES_IN_FIELD: 3600},
+                    fields.TOKEN_TYPE_FIELD: "Bearer", 
+                    fields.EXPIRES_IN_FIELD: 3600,
+                    fields.SCOPE_FIELD: fields.SCOPE_BOT,
+                    fields.TOKEN_PAYLOAD_FIELD: {"iss": "zanuda-auth-service", "sub": fields.SUBJECT_BOT, "aud": ["zanuda-internal-api"], fields.EXPIRES_IN_FIELD: 3600},
                 },
                 "UPDATE auth.service_clients SET scopes = ARRAY['bot', 'admin']::text[] WHERE client_id = 'bot'",
                 "UPDATE auth.service_clients SET scopes = ARRAY['bot']::text[] WHERE client_id = 'bot'",
@@ -78,16 +57,16 @@ class TestAuthServiceV0Login:
             ),
             pytest.param(
                 dict[str, str](
-                    grant_type=GRANT_TYPE_CLIENT_CREDENTIALS,
-                    client_id=CLIENT_ID_BOT,
+                    grant_type=fields.GRANT_TYPE_CLIENT_CREDENTIALS,
+                    client_id=fields.CLIENT_ID_BOT,
                     client_secret="",
                     scope="",
                 ),
                 {
-                    TOKEN_TYPE_FIELD: "Bearer",
-                    EXPIRES_IN_FIELD: 3600,
-                    SCOPE_FIELD: "bot admin",
-                    TOKEN_PAYLOAD_FIELD: {"iss": "zanuda-auth-service", "sub": SUBJECT_BOT, "aud": ["zanuda-internal-api"], EXPIRES_IN_FIELD: 3600},
+                    fields.TOKEN_TYPE_FIELD: "Bearer",
+                    fields.EXPIRES_IN_FIELD: 3600,
+                    fields.SCOPE_FIELD: "bot admin",
+                    fields.TOKEN_PAYLOAD_FIELD: {"iss": "zanuda-auth-service", "sub": fields.SUBJECT_BOT, "aud": ["zanuda-internal-api"], fields.EXPIRES_IN_FIELD: 3600},
                 },
                 "UPDATE auth.service_clients SET scopes = ARRAY['bot', 'admin']::text[] WHERE client_id = 'bot'",
                 "UPDATE auth.service_clients SET scopes = ARRAY['bot']::text[] WHERE client_id = 'bot'",
@@ -121,14 +100,14 @@ class TestAuthServiceV0Login:
 
             response = auth_service_v0_api_client.login(req)
 
-            log_internal_server_error(response, logger, ERROR_FIELD)
+            log_internal_server_error(response, logger, fields.ERROR_FIELD)
 
             assert expected_status_code == response.status_code
             response_data = response.json()
 
-            assert expected_fields[TOKEN_TYPE_FIELD] == response_data[TOKEN_TYPE_FIELD]
-            assert expected_fields[EXPIRES_IN_FIELD] == response_data[EXPIRES_IN_FIELD]
-            assert expected_fields[SCOPE_FIELD] == response_data[SCOPE_FIELD]
+            assert expected_fields[fields.TOKEN_TYPE_FIELD] == response_data[fields.TOKEN_TYPE_FIELD]
+            assert expected_fields[fields.EXPIRES_IN_FIELD] == response_data[fields.EXPIRES_IN_FIELD]
+            assert expected_fields[fields.SCOPE_FIELD] == response_data[fields.SCOPE_FIELD]
 
             check_token_fields(
                 token=response_data["access_token"],
@@ -144,96 +123,191 @@ class TestAuthServiceV0Login:
             "down_sql",
             "login_secret_bundle",
             "expected_status_code",
+            "expected_audit_message",
         ),
         [
             pytest.param(
                 dict[str, str](
-                    grant_type=GRANT_TYPE_CLIENT_CREDENTIALS,
-                    client_id=CLIENT_ID_BOT,
+                    grant_type=fields.GRANT_TYPE_CLIENT_CREDENTIALS,
+                    client_id=fields.CLIENT_ID_BOT,
                     client_secret="",
                     scope="bot bot admin",
                 ),
                 "invalid scope",
-                CLIENT_ID_BOT,
+                fields.CLIENT_ID_BOT,
                 None,
                 None,
-                VAULT_SECRET_BUNDLE,
+                fields.VAULT_SECRET_BUNDLE,
                 httpx.codes.FORBIDDEN,
+                audit.AuditMessage(
+                    service_name=audit.AUTH_SERVICE_NAME,
+                    level=audit.Level.ERROR,
+                    error_code=audit.ErrorCode.INVALID_SCOPE,
+                    cause="invalid scope",
+                    kind=audit.Kind.VALIDATION,
+                    operation=audit.Operation.AUTH_SERVICE_LOGIN_WITH_CLIENT_CREDENTIALS,
+                    status=audit.Status.FAILED,
+                    context={
+                        fields.CLIENT_ID_FIELD: fields.CLIENT_ID_BOT,
+                        fields.GRANT_TYPE_FIELD: fields.GRANT_TYPE_CLIENT_CREDENTIALS,
+                        fields.SCOPE_FIELD: "bot bot admin",
+                        fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT
+                    },
+                ),
                 id="invalid scope",
             ),
             pytest.param(
                 dict[str, str](
-                    grant_type="password",
-                    client_id=CLIENT_ID_BOT,
+                    grant_type=fields.GRANT_TYPE_PASSWORD,
+                    client_id=fields.CLIENT_ID_BOT,
                     client_secret="",
-                    scope=SCOPE_BOT,
+                    scope=fields.SCOPE_BOT,
                 ),
                 "invalid grant type",
-                CLIENT_ID_BOT,
+                fields.CLIENT_ID_BOT,
                 None,
                 None,
-                VAULT_SECRET_BUNDLE,
+                fields.VAULT_SECRET_BUNDLE,
                 httpx.codes.BAD_REQUEST,
+                audit.AuditMessage(
+                    service_name=audit.AUTH_SERVICE_NAME,
+                    level=audit.Level.WARN,
+                    error_code=audit.ErrorCode.INVALID_GRANT_TYPE,
+                    cause="invalid grant type",
+                    kind=audit.Kind.VALIDATION,
+                    operation=audit.Operation.AUTH_SERVICE_LOGIN,
+                    status=audit.Status.FAILED,
+                    context={
+                        fields.CLIENT_ID_FIELD: fields.CLIENT_ID_BOT,
+                        fields.GRANT_TYPE_FIELD: fields.GRANT_TYPE_PASSWORD,
+                        fields.SCOPE_FIELD: fields.SCOPE_BOT,
+                        fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT
+                    },
+                ),
                 id="invalid grant type",
             ),
             pytest.param(
                 dict[str, str](
-                    grant_type=GRANT_TYPE_CLIENT_CREDENTIALS,
+                    grant_type=fields.GRANT_TYPE_CLIENT_CREDENTIALS,
                     client_id="invalid",
                     client_secret="",
                     scope="",
                 ),
-                INVALID_CLIENT_ERROR,
-                CLIENT_ID_BOT,
+                common_errors.INVALID_CLIENT_ERROR,
+                fields.CLIENT_ID_BOT,
                 None,
                 None,
-                VAULT_SECRET_BUNDLE,
+                fields.VAULT_SECRET_BUNDLE,
                 httpx.codes.UNAUTHORIZED,
-                id=INVALID_CLIENT_ERROR,
+                audit.AuditMessage(
+                    service_name=audit.AUTH_SERVICE_NAME,
+                    level=audit.Level.ERROR,
+                    error_code=audit.ErrorCode.SERVICE_NOT_FOUND,
+                    cause="not found",
+                    kind=audit.Kind.DOMAIN,
+                     message=audit.Message.UNKNOWN_SERVICE_CLIENT,
+                    operation=audit.Operation.AUTH_SERVICE_LOGIN_WITH_CLIENT_CREDENTIALS,
+                    status=audit.Status.FAILED,
+                    context={
+                        fields.CLIENT_ID_FIELD: "invalid",
+                        fields.GRANT_TYPE_FIELD: fields.GRANT_TYPE_CLIENT_CREDENTIALS,
+                        fields.SCOPE_FIELD: "",
+                        fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT
+                    },
+                ),
+                id=common_errors.INVALID_CLIENT_ERROR,
             ),
             pytest.param(
                 dict[str, str](
-                    grant_type=GRANT_TYPE_CLIENT_CREDENTIALS,
-                    client_id=CLIENT_ID_BOT,
+                    grant_type=fields.GRANT_TYPE_CLIENT_CREDENTIALS,
+                    client_id=fields.CLIENT_ID_BOT,
                     client_secret="",
-                    scope=SCOPE_BOT,
+                    scope=fields.SCOPE_BOT,
                 ),
                 "client is inactive",
-                CLIENT_ID_BOT,
+                fields.CLIENT_ID_BOT,
                 "update auth.service_clients SET is_active = false WHERE client_id = 'bot'",
                 "update auth.service_clients SET is_active = true WHERE client_id = 'bot'",
-                VAULT_SECRET_BUNDLE,
+                fields.VAULT_SECRET_BUNDLE,
                 httpx.codes.UNAUTHORIZED,
-                id=INACTIVE_CLIENT_ERROR,
+                audit.AuditMessage(
+                    service_name=audit.AUTH_SERVICE_NAME,
+                    level=audit.Level.ERROR,
+                    error_code=audit.ErrorCode.CLIENT_INACTIVE,
+                    cause="client is inactive",
+                    message=audit.Message.INACTIVE_CLIENT,
+                    kind=audit.Kind.DOMAIN,
+                    operation=audit.Operation.AUTH_SERVICE_LOGIN_WITH_CLIENT_CREDENTIALS,
+                    status=audit.Status.FAILED,
+                    context={
+                        fields.CLIENT_ID_FIELD: fields.CLIENT_ID_BOT,
+                        fields.GRANT_TYPE_FIELD: fields.GRANT_TYPE_CLIENT_CREDENTIALS,
+                        fields.SCOPE_FIELD: fields.SCOPE_BOT,
+                        fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT
+                    },
+                ),
+                id=common_errors.INACTIVE_CLIENT_ERROR,
             ),
             pytest.param(
                 dict[str, str](
-                    grant_type=GRANT_TYPE_CLIENT_CREDENTIALS,
-                    client_id=CLIENT_ID_BOT,
+                    grant_type=fields.GRANT_TYPE_CLIENT_CREDENTIALS,
+                    client_id=fields.CLIENT_ID_BOT,
                     client_secret="",
-                    scope=SCOPE_BOT,
+                    scope=fields.SCOPE_BOT,
+                ),
+                common_errors.INVALID_CLIENT_SECRET_ERROR,
+                fields.CLIENT_ID_BOT,
+                None,
+                None,
+                fields.WRONG_SECRET_BUNDLE,
+                httpx.codes.UNAUTHORIZED,
+                audit.AuditMessage(
+                    service_name=audit.AUTH_SERVICE_NAME,
+                    level=audit.Level.WARN,
+                    error_code=audit.ErrorCode.INVALID_SECRET,
+                    cause=common_errors.INVALID_CLIENT_SECRET_ERROR,
+                    message=audit.Message.INVALID_CLIENT_SECRET,
+                    kind=audit.Kind.DOMAIN,
+                    operation=audit.Operation.AUTH_SERVICE_LOGIN_WITH_CLIENT_CREDENTIALS,
+                    status=audit.Status.FAILED,
+                    context={
+                        fields.CLIENT_ID_FIELD: fields.CLIENT_ID_BOT,
+                        fields.GRANT_TYPE_FIELD: fields.GRANT_TYPE_CLIENT_CREDENTIALS,
+                        fields.SCOPE_FIELD: fields.SCOPE_BOT,
+                        fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT
+                    },
+                ),
+                id=common_errors.INVALID_CLIENT_SECRET_ERROR,
+            ),
+            pytest.param(
+                dict[str, str](
+                    grant_type=fields.GRANT_TYPE_CLIENT_CREDENTIALS,
+                    client_id=fields.CLIENT_ID_BOT,
+                    client_secret="",
+                    scope=fields.SCOPE_BOT,
                 ),
                 "invalid client secret",
-                CLIENT_ID_BOT,
+                fields.CLIENT_ID_BOT,
                 None,
                 None,
-                WRONG_SECRET_BUNDLE,
+                fields.NO_VAULT_SECRET_BUNDLE,
                 httpx.codes.UNAUTHORIZED,
-                id="invalid client secret",
-            ),
-            pytest.param(
-                dict[str, str](
-                    grant_type=GRANT_TYPE_CLIENT_CREDENTIALS,
-                    client_id=CLIENT_ID_BOT,
-                    client_secret="",
-                    scope=SCOPE_BOT,
+                audit.AuditMessage(
+                    service_name=audit.AUTH_SERVICE_NAME,
+                    level=audit.Level.ERROR,
+                    error_code=audit.ErrorCode.VAULT_SECRET_NOT_FOUND,
+                    cause="client secret not found in vault",
+                    kind=audit.Kind.INFRASTRUCTURE,
+                    operation=audit.Operation.AUTH_SERVICE_LOGIN_WITH_CLIENT_CREDENTIALS,
+                    status=audit.Status.FAILED,
+                    message=audit.Message.NOT_FOUND_VAULT_SECRET,
+                    context={
+                        fields.CLIENT_ID_FIELD: fields.CLIENT_ID_BOT,
+                        fields.GRANT_TYPE_FIELD: fields.GRANT_TYPE_CLIENT_CREDENTIALS,
+                        fields.SCOPE_FIELD: fields.SCOPE_BOT,
+                        fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT
+                    },
                 ),
-                "internal server error",
-                CLIENT_ID_BOT,
-                None,
-                None,
-                NO_VAULT_SECRET_BUNDLE,
-                httpx.codes.INTERNAL_SERVER_ERROR,
                 id="no vault client secret",
             ),
         ],
@@ -250,6 +324,8 @@ class TestAuthServiceV0Login:
         client_id: str,
         expected_status_code: int,
         login_secret_bundle: LoginSecretBundle,
+        auth_service_error_messages_from_rabbitmq: ContextManager[Optional[bytes]],
+        expected_audit_message: audit.AuditMessage,
     ) -> None:
         """
         Тест на невалидные запросы на авторизацию.
@@ -269,43 +345,104 @@ class TestAuthServiceV0Login:
             with login_secret_bundle.around_login(client_id):
                 response = auth_service_v0_api_client.login(req)
 
-            log_internal_server_error(response, logger, ERROR_FIELD)
+            log_internal_server_error(response, logger, fields.ERROR_FIELD)
 
             assert expected_status_code == response.status_code
-            assert expected_message == response.json()[ERROR_FIELD]
+            assert expected_message == response.json()[fields.ERROR_FIELD]
 
-    @pytest.mark.parametrize(
+            with auth_service_error_messages_from_rabbitmq as rabbitmq_message:
+                    message = rabbitmq_message
+            if message:
+                real_message = audit.AuditMessage.model_validate_json(message)
+                
+                audit.assert_audit_message(expected_audit_message, real_message)
+                audit.assert_audit_message_context(expected_audit_message, real_message)
+            else:
+                pytest.fail("Нет сообщений в очереди")
+
+    @pytest.mark.parametrize( # noqa: WPS211
             (
                 "body",
                 "expected_message",
                 "expected_status_code",
+                "expected_audit_message",
             ),
             [
                 pytest.param(
                     dict[str, str](),
-                    INVALID_GRANT_TYPE_ERROR,
+                    common_errors.EMPTY_LOGIN_REQUEST_ERROR,
                     httpx.codes.BAD_REQUEST,
+                    audit.AuditMessage(
+                        service_name=audit.AUTH_SERVICE_NAME,
+                        level=audit.Level.WARN,
+                        error_code=audit.ErrorCode.EMPTY_LOGIN_REQUEST,
+                        cause="empty login request",
+                        kind=audit.Kind.VALIDATION,
+                        message=audit.Message.EMPTY_LOGIN_REQUEST,
+                        operation=audit.Operation.AUTH_SERVICE_LOGIN,
+                        status=audit.Status.FAILED,
+                        context={
+                            fields.CLIENT_ID_FIELD: "",
+                            fields.GRANT_TYPE_FIELD: "",
+                            fields.SCOPE_FIELD: "",
+                            fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT,
+                    },
+                    ),
                     id="empty body",
                 ),
                  pytest.param(
                     {"invalid-json": "invalid-json"},
-                    INVALID_GRANT_TYPE_ERROR,
+                    common_errors.EMPTY_LOGIN_REQUEST_ERROR,
                     httpx.codes.BAD_REQUEST,
+                    audit.AuditMessage(
+                       service_name=audit.AUTH_SERVICE_NAME,
+                        level=audit.Level.WARN,
+                        error_code=audit.ErrorCode.EMPTY_LOGIN_REQUEST,
+                        cause="empty login request",
+                        kind=audit.Kind.VALIDATION,
+                        message=audit.Message.EMPTY_LOGIN_REQUEST,
+                        operation=audit.Operation.AUTH_SERVICE_LOGIN,
+                        status=audit.Status.FAILED,
+                        context={
+                            fields.CLIENT_ID_FIELD: "",
+                            fields.GRANT_TYPE_FIELD: "",
+                            fields.SCOPE_FIELD: "",
+                            fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT,
+                        },
+                    ),
                     id="invalid json",
                 ),
                 pytest.param(
                     {"grant_type":"client_credentials","client_secret":"x"},
-                    INVALID_CLIENT_ERROR,
+                    common_errors.INVALID_CLIENT_ERROR,
                     httpx.codes.UNAUTHORIZED,
+                    audit.AuditMessage(
+                        service_name=audit.AUTH_SERVICE_NAME,
+                        level=audit.Level.ERROR,
+                        error_code=audit.ErrorCode.SERVICE_NOT_FOUND,
+                        cause="not found",
+                        message=audit.Message.UNKNOWN_SERVICE_CLIENT,
+                        kind=audit.Kind.DOMAIN,
+                        status=audit.Status.FAILED,
+                        operation=audit.Operation.AUTH_SERVICE_LOGIN_WITH_CLIENT_CREDENTIALS,
+                         context={
+                            fields.CLIENT_ID_FIELD: "",
+                            fields.GRANT_TYPE_FIELD: fields.GRANT_TYPE_CLIENT_CREDENTIALS,
+                            fields.SCOPE_FIELD: "",
+                            fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT,
+                        },
+                    ),
                     id="invalid client",
                 )
             ],
         )
-    def test_invalid_body(self, 
+    def test_invalid_body(self, # noqa: WPS211
         auth_service_v0_api_client: AuthServiceV0APIClient,
         body: dict[str, Any],
         expected_message: str,
         expected_status_code: int,
+        expected_audit_message: audit.AuditMessage,
+        auth_service_error_messages_from_rabbitmq: ContextManager[Optional[bytes]],
     ) -> None:
         """
         Тест на невалидные запросы на авторизацию.
@@ -316,7 +453,18 @@ class TestAuthServiceV0Login:
         """
         response = auth_service_v0_api_client.login(body)
 
-        log_internal_server_error(response, logger, ERROR_FIELD)
+        log_internal_server_error(response, logger, fields.ERROR_FIELD)
 
         assert expected_status_code == response.status_code
-        assert expected_message == response.json()[ERROR_FIELD]
+        assert expected_message == response.json()[fields.ERROR_FIELD] 
+
+        with auth_service_error_messages_from_rabbitmq as rabbitmq_message:
+            message = rabbitmq_message
+            if message:
+                real_message = audit.AuditMessage.model_validate_json(message)
+                
+                audit.assert_audit_message(expected_audit_message, real_message)
+                audit.assert_audit_message_context(expected_audit_message, real_message)
+            else:
+                pytest.fail("Нет сообщений в очереди")
+  

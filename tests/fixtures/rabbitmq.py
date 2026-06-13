@@ -57,3 +57,11 @@ def note_messages_from_rabbitmq(
     """Фикстура, возвращающая сообщение из очереди заметок"""
 
     return _get_messages_from_queue(rabbitmq, rabbitmq.config.notes_queue)
+
+
+@pytest.fixture(scope="function")
+def auth_service_error_messages_from_rabbitmq(
+    rabbitmq: RabbitMQ,
+) -> ContextManager[Optional[bytes]]:
+    """Фикстура, возвращающая сообщение из очереди ошибок сервиса авторизации"""
+    return _get_messages_from_queue(rabbitmq, rabbitmq.config.auth_service_error_queue)
