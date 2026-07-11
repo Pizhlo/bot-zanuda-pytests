@@ -20,6 +20,10 @@ class ErrorCode(StrEnum):
     VAULT_SECRET_NOT_FOUND = "VAULT_SECRET_NOT_FOUND"
     EMPTY_LOGIN_REQUEST = "EMPTY_LOGIN_REQUEST"
     PERM_DENIED_SPACE="PERM_DENIED_SPACE"
+    WRITE_FAILED_DUE_TO_INVALID_INPUT="WRITE_FAILED_DUE_TO_INVALID_INPUT"
+    USER_NOT_FOUND="USER_NOT_FOUND"
+    RESOURCE_ALREADY_EXISTS_OR_NOT_FOUND = "RESOURCE_ALREADY_EXISTS_OR_NOT_FOUND"
+    NO_TUPLES_TO_WRITE_OR_DELETE = "NO_TUPLES_TO_WRITE_OR_DELETE"
 
 class Operation(StrEnum):
     """Перечисление операций"""
@@ -27,6 +31,7 @@ class Operation(StrEnum):
     AUTH_SERVICE_LOGIN = "auth-service.login"
     AUTH_SERVICE_LOGIN_WITH_CLIENT_CREDENTIALS = "auth-service.loginWithClientCredentials"
     POLITICS_FILTER_NOTES="politics.filter_notes"
+    FGA_UPDATE_RESOURCE="fga.update_resource"
 
 class Level(StrEnum):
     """Перечисление уровней событий"""

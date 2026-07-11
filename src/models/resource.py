@@ -1,0 +1,129 @@
+from dataclasses import dataclass, fields as dataclass_fields, is_dataclass
+from enum import Enum
+from typing import Any
+
+
+@dataclass(frozen=True)
+class ResourceRef:
+    """Ссылка на ресурс или связанную сущность."""
+
+    type: str
+    id: str
+
+
+@dataclass(frozen=True)
+class ResourceRelations:
+    """Связи ресурса с другими сущностями."""
+
+    owner: ResourceRef
+    parent: ResourceRef
+
+
+@dataclass(frozen=True)
+class ResourceEventContext:
+    """Контекст события изменения ресурса."""
+
+    source_service: str
+    event_type: str
+
+
+@dataclass(frozen=True)
+class ResourceChangeMessage:
+    """Сообщение об изменении ресурса (создание, обновление, удаление)."""
+
+    request_id: str
+    resource: ResourceRef
+    operation: str
+    change_type: str
+    relations: ResourceRelations | None
+    context: ResourceEventContext
+
+
+@dataclass(frozen=True)
+class AuthTuple:
+    """Запись в модели авторизации (subject, relation, resource)."""
+
+    subject: str
+    relation: str
+    resource: str
+
+
+@dataclass(frozen=True)
+class ResourceChangeMeta:
+    """Метаданные ответа на изменение ресурса."""
+
+    auth_model_id: str
+
+
+@dataclass(frozen=True)
+class ResourceChangeResponse:
+    """Ответ на изменение ресурса."""
+
+    request_id: str
+    idempotency_key: str
+    status: str
+    operation_result: str
+    resource: ResourceRef
+    written_tuples: tuple[AuthTuple, ...]
+    deleted_tuples: tuple[AuthTuple, ...]
+    meta: ResourceChangeMeta
+
+
+@dataclass(frozen=True)
+class ResourceChangeErrorDetails:
+    """Детали ошибки изменения ресурса."""
+
+    operation: str
+
+
+@dataclass(frozen=True)
+class ResourceChangeError:
+    """Ошибка изменения ресурса."""
+
+    code: str
+    message: str
+    details: ResourceChangeErrorDetails
+
+
+@dataclass(frozen=True)
+class ResourceChangeErrorResponse:
+    """Ответ с ошибкой на изменение ресурса."""
+
+    request_id: str
+    status: str
+    operation_result: str
+    resource: ResourceRef
+    error: ResourceChangeError
+    meta: ResourceChangeMeta
+
+
+def _serialize_api_value(raw_value: Any) -> Any:
+    if isinstance(raw_value, Enum):
+        serialized = raw_value.value
+    elif is_dataclass(raw_value):
+        serialized = {
+            field.name: _serialize_api_value(getattr(raw_value, field.name))
+            for field in dataclass_fields(raw_value)
+        }
+    elif isinstance(raw_value, tuple):
+        serialized = [_serialize_api_value(element) for element in raw_value]
+    elif isinstance(raw_value, list):
+        serialized = [_serialize_api_value(element) for element in raw_value]
+    elif isinstance(raw_value, dict):
+        serialized = {
+            key: _serialize_api_value(nested_value)
+            for key, nested_value in raw_value.items()
+        }
+    else:
+        serialized = raw_value
+    return serialized
+
+
+def to_api_dict(dataclass_instance: Any) -> dict[str, Any]:
+    """Сериализует dataclass ответа API в dict, совместимый с response.json()."""
+    serialized = _serialize_api_value(dataclass_instance)
+    if not isinstance(serialized, dict):
+        raise TypeError(f"Expected dataclass, got {type(dataclass_instance)}")
+    if "operation_result" in serialized:
+        serialized["result"] = serialized.pop("operation_result")
+    return serialized
