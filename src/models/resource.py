@@ -5,6 +5,14 @@ from enum import Enum
 from typing import Any
 
 
+REF_SEPARATOR = ":"
+
+
+def format_ref(resource_type: str, resource_id: str) -> str:
+    """Форматирует ссылку на ресурс в формате type:id."""
+    return REF_SEPARATOR.join((resource_type, resource_id))
+
+
 @dataclass(frozen=True)
 class ResourceRef:
     """Ссылка на ресурс или связанную сущность."""
@@ -18,7 +26,7 @@ class ResourceRelations:
     """Связи ресурса с другими сущностями."""
 
     owner: ResourceRef
-    parent: ResourceRef
+    parent: ResourceRef | None
 
 
 @dataclass(frozen=True)

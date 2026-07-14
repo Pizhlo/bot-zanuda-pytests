@@ -69,3 +69,4 @@ class OperationResult(StrEnum):
 
 class EventType(StrEnum):
     NOTE_CREATED = "NOTE_CREATED"
+    SPACE_CREATED = "SPACE_CREATED"

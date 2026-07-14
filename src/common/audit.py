@@ -53,6 +53,9 @@ class Message(StrEnum):
     NOT_FOUND_VAULT_SECRET="vault secret not found"
     USER_IS_NOT_MEMBER="user is not member"
     NO_PREFIX_BEARER="invalid token: no prefix Bearer"
+    NO_TUPLES_TO_WRITE_OR_DELETE="no tuples to write or delete"
+    USER_NOT_FOUND="user not found"
+    NOT_FOUND="not found"
 
 class Status(StrEnum):
     """Перечисление статусов событий"""
