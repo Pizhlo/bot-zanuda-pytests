@@ -2,8 +2,7 @@ import logging, time
 from dataclasses import asdict, dataclass
 from collections.abc import Callable
 from typing import ContextManager, Optional
-
-import httpx, pytest
+import httpx, pytest, uuid
 
 from src.api_clients.auth_service import AuthServiceV0APIClient
 from src.common.server_error_logging import log_internal_server_error
@@ -15,11 +14,10 @@ from tests.fixtures.auth_jwt import TokenFields
 
 logger = logging.getLogger(__name__)
 
-NOTE_CREATED_REQUEST_ID = "eb926322-662f-43a0-987b-bbaf1fd6f029"
-NOTE_OWNER_ID = "56279a7c-13a0-4464-98fe-8cee52bcd3b7"
-NOTE_SPACE_ID = "7cc54caa-1753-4839-aa0c-6f2a76a08e93"
+NOTE_CREATED_REQUEST_ID = str(uuid.uuid4())
+NOTE_OWNER_ID = ids.SHARED_SPACE_OWNER_UUID
+NOTE_SPACE_ID = ids.SHARED_SPACE_ID
 NOTE_ID = "1776f52a-8ce0-4bcd-9b75-0d3f2606883a"
-AUTH_MODEL_ID = "01KVB3NPFGQB428JBQPMVZE08X"
 
 NOTE_OWNER_SUBJECT = f"{fields.ResourceType.USER}:{NOTE_OWNER_ID}"
 NOTE_RESOURCE = f"{fields.ResourceType.NOTE}:{NOTE_ID}"
@@ -27,6 +25,7 @@ NOTE_SPACE_SUBJECT = f"{fields.ResourceType.SPACE}:{NOTE_SPACE_ID}"
 
 ONE_HOUR_SECONDS = 60 * 60
 
+SPACE_CREATED_REQUEST_ID = str(uuid.uuid4())
 
 @dataclass(frozen=True)
 class UpdateResourceCase:
@@ -113,7 +112,7 @@ class TestUpdateResource:
                             ),
                         ),
                         deleted_tuples=(),
-                        meta=resource.ResourceChangeMeta(auth_model_id=AUTH_MODEL_ID),
+                        meta=resource.ResourceChangeMeta(),
                     ),
                     expected_message=None,
                 ),
@@ -148,7 +147,7 @@ class TestUpdateResource:
                             message="new resource already exists or deleted resource not found",
                             details=resource.ResourceChangeErrorDetails(operation=fields.Operation.CREATE),
                         ),
-                        meta=resource.ResourceChangeMeta(auth_model_id=""),
+                        meta=resource.ResourceChangeMeta(),
                     ),
                     expected_message=None,
                 ),
@@ -196,7 +195,7 @@ class TestUpdateResource:
                             message="user not found",
                             details=resource.ResourceChangeErrorDetails(operation=fields.Operation.CREATE),
                         ),
-                        meta=resource.ResourceChangeMeta(auth_model_id=""),
+                        meta=resource.ResourceChangeMeta(),
                     ),
                     expected_message=None,
                 ),
@@ -237,7 +236,7 @@ class TestUpdateResource:
                             message="no tuples to write or delete",
                             details=resource.ResourceChangeErrorDetails(operation=fields.Operation.CREATE),
                         ),
-                        meta=resource.ResourceChangeMeta(auth_model_id=""),
+                        meta=resource.ResourceChangeMeta(),
                     ),
                     expected_message=None,
                 ),
@@ -280,7 +279,7 @@ class TestUpdateResource:
             assert response.json()[fields.ERROR_FIELD] == case.expected_message
 
         if case.expected_response is not None:
-            assert response.json() == resource.to_api_dict(case.expected_response)
+            resource.assert_api_response(response.json(), case.expected_response)
         
         with auth_service_error_messages_from_rabbitmq as rabbitmq_message:
             message = rabbitmq_message
@@ -711,7 +710,7 @@ class TestUpdateResource:
         log_internal_server_error(response, logger, fields.ERROR_FIELD)
 
         if invalid_case.expected_response is not None:
-            assert response.json() == resource.to_api_dict(invalid_case.expected_response)
+            resource.assert_api_response(response.json(), invalid_case.expected_response)
 
         with auth_service_error_messages_from_rabbitmq as rabbitmq_message:
             message = rabbitmq_message

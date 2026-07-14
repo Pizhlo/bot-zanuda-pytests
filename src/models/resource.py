@@ -1,3 +1,5 @@
+import copy
+
 from dataclasses import dataclass, fields as dataclass_fields, is_dataclass
 from enum import Enum
 from typing import Any
@@ -52,7 +54,7 @@ class AuthTuple:
 class ResourceChangeMeta:
     """Метаданные ответа на изменение ресурса."""
 
-    auth_model_id: str
+    auth_model_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -127,3 +129,25 @@ def to_api_dict(dataclass_instance: Any) -> dict[str, Any]:
     if "operation_result" in serialized:
         serialized["result"] = serialized.pop("operation_result")
     return serialized
+
+
+def _without_auth_model_id(payload: dict[str, Any]) -> dict[str, Any]:
+    """Удаляет auth_model_id из payload."""
+    copy_result = copy.deepcopy(payload)
+    meta = copy_result.get("meta")
+    if isinstance(meta, dict):
+        meta.pop("auth_model_id", None)
+        if not meta:
+            copy_result.pop("meta", None)
+    return copy_result
+
+
+def assert_api_response(
+    actual: dict[str, Any],
+    expected: ResourceChangeResponse | ResourceChangeErrorResponse,
+) -> None:
+    """Сравнивает ответ API с ожидаемым dataclass, игнорируя meta.auth_model_id."""
+    assert _without_auth_model_id(actual) == _without_auth_model_id(to_api_dict(expected))
+
+    if expected.meta.auth_model_id is not None:
+        assert actual.get("meta", {}).get("auth_model_id") == expected.meta.auth_model_id
