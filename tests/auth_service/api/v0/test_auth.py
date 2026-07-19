@@ -347,9 +347,6 @@ class TestAuthServiceV0Login:
 
             log_internal_server_error(response, logger, fields.ERROR_FIELD)
 
-            assert expected_status_code == response.status_code
-            assert expected_message == response.json()[fields.ERROR_FIELD]
-
             with auth_service_error_messages_from_rabbitmq as rabbitmq_message:
                     message = rabbitmq_message
             if message:
@@ -359,6 +356,9 @@ class TestAuthServiceV0Login:
                 audit.assert_audit_message_context(expected_audit_message, real_message)
             else:
                 pytest.fail("Нет сообщений в очереди")
+
+            assert expected_status_code == response.status_code
+            assert expected_message == response.json()[fields.ERROR_FIELD]
 
     @pytest.mark.parametrize( # noqa: WPS211
             (
@@ -455,9 +455,6 @@ class TestAuthServiceV0Login:
 
         log_internal_server_error(response, logger, fields.ERROR_FIELD)
 
-        assert expected_status_code == response.status_code
-        assert expected_message == response.json()[fields.ERROR_FIELD] 
-
         with auth_service_error_messages_from_rabbitmq as rabbitmq_message:
             message = rabbitmq_message
             if message:
@@ -467,4 +464,7 @@ class TestAuthServiceV0Login:
                 audit.assert_audit_message_context(expected_audit_message, real_message)
             else:
                 pytest.fail("Нет сообщений в очереди")
+
+        assert expected_status_code == response.status_code
+        assert expected_message == response.json()[fields.ERROR_FIELD]
   
