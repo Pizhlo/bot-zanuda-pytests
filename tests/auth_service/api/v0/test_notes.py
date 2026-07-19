@@ -344,16 +344,9 @@ class TestAuthServiceV0Notes:
         
         response = auth_service_v0_api_client.filter_notes(token=token, body=case.body, x_telegram_user_id=case.x_telegram_user_id)
         log_internal_server_error(response, logger, fields.ERROR_FIELD)
-        assert response.status_code == case.expected_status_code, response.text
-
-        if case.expected_message is not None:
-            assert case.expected_message == response.json()[fields.ERROR_FIELD]
-
-        if case.expected_response is not None:
-            assert case.expected_response == response.json()
 
         with auth_service_error_messages_from_rabbitmq as rabbitmq_message:
-                    message = rabbitmq_message
+            message = rabbitmq_message
         if message and expected_audit_message is not None:
             real_message = audit.AuditMessage.model_validate_json(message)
             
@@ -361,6 +354,14 @@ class TestAuthServiceV0Notes:
             audit.assert_audit_message_context(expected_audit_message, real_message)
         elif expected_audit_message is not None:
             pytest.fail("Нет сообщений в очереди")
+
+        assert response.status_code == case.expected_status_code, response.text
+
+        if case.expected_message is not None:
+            assert case.expected_message == response.json()[fields.ERROR_FIELD]
+
+        if case.expected_response is not None:
+            assert case.expected_response == response.json()
 
     @pytest.mark.parametrize(
         ("invalid_case", "expected_audit_message"),
@@ -773,16 +774,7 @@ class TestAuthServiceV0Notes:
             body=None,
             x_telegram_user_id=invalid_case.telegram_user_id,
         )
-        assert response.status_code == invalid_case.expected_status_code, response.text
-
-        if invalid_case.expected_message is not None:
-            assert invalid_case.expected_message == response.json()[fields.ERROR_FIELD]
-
-        log_internal_server_error(response, logger, fields.ERROR_FIELD)
-
-        if invalid_case.expected_response is not None:
-            assert invalid_case.expected_response == response.json()
-
+        
         with auth_service_error_messages_from_rabbitmq as rabbitmq_message:
             message = rabbitmq_message
 
@@ -792,3 +784,14 @@ class TestAuthServiceV0Notes:
             audit.assert_audit_message_context(expected_audit_message, real_message)
         elif expected_audit_message is not None:
             pytest.fail("Нет сообщений в очереди")
+
+
+        assert response.status_code == invalid_case.expected_status_code, response.text
+
+        if invalid_case.expected_message is not None:
+            assert invalid_case.expected_message == response.json()[fields.ERROR_FIELD]
+
+        log_internal_server_error(response, logger, fields.ERROR_FIELD)
+
+        if invalid_case.expected_response is not None:
+            assert invalid_case.expected_response == response.json()

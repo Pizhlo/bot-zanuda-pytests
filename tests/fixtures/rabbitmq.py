@@ -1,5 +1,4 @@
 import logging
-import time
 from contextlib import contextmanager
 from typing import ContextManager, Generator, Optional
 
@@ -27,14 +26,14 @@ def _get_messages_from_queue(
     channel = rabbitmq.connection.channel()
 
     try:
-        yield _get_single_message(channel, queue_name, rabbitmq.config.poll_interval_sec, rabbitmq.config.queue_poll_attempts)
+        yield _get_single_message(channel, queue_name, rabbitmq.config.queue_poll_attempts)
     finally:
         if channel and not channel.is_closed:
             channel.close()
 
 
 def _get_single_message(
-    channel: pika.channel.Channel, queue_name: str, poll_interval_sec: float, queue_poll_attempts: int
+    channel: pika.channel.Channel, queue_name: str, queue_poll_attempts: int
 ) -> Optional[bytes]:
     """Получает одно сообщение из очереди, ожидая публикации из auth-service."""
     for attempt in range(queue_poll_attempts):
@@ -45,9 +44,6 @@ def _get_single_message(
         if method_frame:
             logger.info("Received message: %s", body)
             return body if isinstance(body, bytes) else None
-
-        if attempt < queue_poll_attempts - 1:
-            time.sleep(poll_interval_sec)
 
     logger.info("No messages in queue")
     return None

@@ -276,6 +276,10 @@ class TestUpdateResource:
 
         response = auth_service_v0_api_client.update_resource(asdict(case.request), token=token, x_telegram_user_id=case.x_telegram_user_id)
         log_internal_server_error(response, logger, fields.ERROR_FIELD)
+
+        with auth_service_error_messages_from_rabbitmq as rabbitmq_message:
+            message = rabbitmq_message
+
         assert response.status_code == case.expected_status_code, response.text
 
         if case.expected_message is not None:
@@ -283,9 +287,6 @@ class TestUpdateResource:
 
         if case.expected_response is not None:
             resource.assert_api_response(response.json(), case.expected_response)
-        
-        with auth_service_error_messages_from_rabbitmq as rabbitmq_message:
-            message = rabbitmq_message
 
         if message and expected_audit_message is not None:
             real_message = audit.AuditMessage.model_validate_json(message)
@@ -488,6 +489,10 @@ class TestUpdateResource:
 
         response = auth_service_v0_api_client.update_resource(asdict(case.request), token=token, x_telegram_user_id=case.x_telegram_user_id)
         log_internal_server_error(response, logger, fields.ERROR_FIELD)
+
+        with auth_service_error_messages_from_rabbitmq as rabbitmq_message:
+            message = rabbitmq_message
+
         assert response.status_code == case.expected_status_code, response.text
 
         if case.expected_message is not None:
@@ -495,9 +500,6 @@ class TestUpdateResource:
 
         if case.expected_response is not None:
             resource.assert_api_response(response.json(), case.expected_response)
-        
-        with auth_service_error_messages_from_rabbitmq as rabbitmq_message:
-            message = rabbitmq_message
 
         if message and expected_audit_message is not None:
             real_message = audit.AuditMessage.model_validate_json(message)
@@ -917,18 +919,18 @@ class TestUpdateResource:
             token=token,
             x_telegram_user_id=invalid_case.telegram_user_id,
         )
+        log_internal_server_error(response, logger, fields.ERROR_FIELD)
+
+        with auth_service_error_messages_from_rabbitmq as rabbitmq_message:
+            message = rabbitmq_message
+
         assert response.status_code == invalid_case.expected_status_code, response.text
 
         if invalid_case.expected_message is not None:
             assert invalid_case.expected_message == response.json()[fields.ERROR_FIELD]
 
-        log_internal_server_error(response, logger, fields.ERROR_FIELD)
-
         if invalid_case.expected_response is not None:
             resource.assert_api_response(response.json(), invalid_case.expected_response)
-
-        with auth_service_error_messages_from_rabbitmq as rabbitmq_message:
-            message = rabbitmq_message
 
         if message and expected_audit_message is not None:
             real_message = audit.AuditMessage.model_validate_json(message)
