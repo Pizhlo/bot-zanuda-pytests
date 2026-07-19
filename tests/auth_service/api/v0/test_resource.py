@@ -30,6 +30,51 @@ ONE_HOUR_SECONDS = 60 * 60
 
 SPACE_CREATED_REQUEST_ID = str(uuid.uuid4())
 
+note_and_reminder_create_event_types = {
+    fields.ResourceType.NOTE: fields.EventType.NOTE_CREATED,
+    fields.ResourceType.REMINDER: fields.EventType.REMINDER_CREATED,
+}
+
+wrong_create_event_types = {
+    fields.ResourceType.NOTE: fields.EventType.NOTE_UPDATED,
+    fields.ResourceType.REMINDER: fields.EventType.REMINDER_UPDATED,
+}
+
+
+def _change_type_mismatch_message(allowed: tuple[str, ...], got: str) -> str:
+    return (
+        f"change type mismatch: expected one of `{', '.join(allowed)}`, got `{got}`"
+    )
+
+
+def _event_type_mismatch_message(expected: str, got: str) -> str:
+    return f"event type mismatch: expected `{expected}`, got `{got}`"
+
+
+def _make_create_request( # noqa: WPS211
+    *,
+    resource_type: str,
+    resource_id: str,
+    request_id: str,
+    event_type: str,
+    owner: resource.ResourceRef | None,
+    parent: resource.ResourceRef | None,
+    change_type: str = fields.ChangeType.RESOURCE_ADDED,
+    operation: str = fields.Operation.CREATE,
+) -> resource.ResourceChangeMessage:
+    return resource.ResourceChangeMessage(
+        request_id=request_id,
+        resource=resource.ResourceRef(type=resource_type, id=resource_id),
+        operation=operation,
+        change_type=change_type,
+        relations=resource.ResourceRelations(owner=owner, parent=parent),
+        context=resource.ResourceEventContext(
+            source_service=fields.NOTES_SERVICE_NAME,
+            event_type=event_type,
+        ),
+    )
+
+
 @dataclass(frozen=True)
 class UpdateResourceCase:
     """Сценарий для вызова update_resource."""
@@ -50,6 +95,63 @@ class InvalidUpdateResourceTokenCase:
     telegram_user_id: str | None
     expected_message: str | None
     expected_response: resource.ResourceChangeResponse | None
+
+
+EMPTY_RESOURCE_REF = resource.ResourceRef(
+    type="",
+    id="00000000-0000-0000-0000-000000000000",
+)
+
+
+@dataclass(frozen=True)
+class ValidationErrorCase:
+    """Сценарий негативной валидации тела update_resource."""
+
+    request: resource.ResourceChangeMessage
+    expected_response: resource.ResourceChangeErrorResponse
+    expected_status_code: int = httpx.codes.BAD_REQUEST
+
+
+def _validation_error_response(
+    request: resource.ResourceChangeMessage,
+    *,
+    code: str,
+    message: str,
+    detailed_error: resource.DetailedError | None = None,
+) -> resource.ResourceChangeErrorResponse:
+    return resource.ResourceChangeErrorResponse(
+        request_id=request.request_id,
+        status=fields.Status.ERROR,
+        operation_result=fields.OperationResult.FAILED,
+        resource=request.resource,
+        error=resource.ResourceChangeError(
+            code=code,
+            message=message,
+            details=resource.ResourceChangeErrorDetails(
+                operation=request.operation,
+                detailed_error=detailed_error,
+            ),
+        ),
+        meta=resource.ResourceChangeMeta(),
+    )
+
+
+def _validation_case(
+    request: resource.ResourceChangeMessage,
+    *,
+    code: str,
+    message: str,
+    detailed_error: resource.DetailedError | None = None,
+) -> ValidationErrorCase:
+    return ValidationErrorCase(
+        request=request,
+        expected_response=_validation_error_response(
+            request,
+            code=code,
+            message=message,
+            detailed_error=detailed_error,
+        ),
+    )
 
 
 DEFAULT_UPDATE_RESOURCE_REQUEST = resource.ResourceChangeMessage(
@@ -938,3 +1040,291 @@ class TestUpdateResource:
             audit.assert_audit_message_context(expected_audit_message, real_message)
         elif expected_audit_message is not None:
             pytest.fail("No audit messages in queue")
+
+    @pytest.mark.parametrize(
+        "case",
+        [
+            *[
+                pytest.param(
+                    _validation_case(
+                        _make_create_request(
+                            resource_type=resource_type,
+                            resource_id=str(uuid.uuid4()),
+                            request_id=str(uuid.uuid4()),
+                            event_type=event_type,
+                            owner=None,
+                            parent=resource.ResourceRef(
+                                type=fields.ResourceType.SPACE, id=NOTE_SPACE_ID
+                            ),
+                        ),
+                        code=audit.ErrorCode.OWNER_REQUIRED,
+                        message=audit.Message.OWNER_REQUIRED,
+                        detailed_error=resource.DetailedError(value=EMPTY_RESOURCE_REF),
+                    ),
+                    id=f"{resource_type}: owner required",
+                )
+                for resource_type, event_type in note_and_reminder_create_event_types.items()
+            ],
+            *[
+                pytest.param(
+                    _validation_case(
+                        _make_create_request(
+                            resource_type=resource_type,
+                            resource_id=str(uuid.uuid4()),
+                            request_id=str(uuid.uuid4()),
+                            event_type=event_type,
+                            owner=resource.ResourceRef(
+                                type=fields.ResourceType.SPACE, id=NOTE_OWNER_ID
+                            ),
+                            parent=resource.ResourceRef(
+                                type=fields.ResourceType.SPACE, id=NOTE_SPACE_ID
+                            ),
+                        ),
+                        code=audit.ErrorCode.OWNER_TYPE_INVALID,
+                        message=audit.Message.OWNER_TYPE_INVALID,
+                        detailed_error=resource.DetailedError(
+                            value=resource.ResourceRef(
+                                type=fields.ResourceType.SPACE, id=NOTE_OWNER_ID
+                            ),
+                        ),
+                    ),
+                    id=f"{resource_type}: owner type invalid",
+                )
+                for resource_type, event_type in note_and_reminder_create_event_types.items()
+            ],
+            *[
+                pytest.param(
+                    _validation_case(
+                        _make_create_request(
+                            resource_type=resource_type,
+                            resource_id=str(uuid.uuid4()),
+                            request_id=str(uuid.uuid4()),
+                            event_type=event_type,
+                            owner=resource.ResourceRef(
+                                type=fields.ResourceType.USER, id=NOTE_OWNER_ID
+                            ),
+                            parent=None,
+                        ),
+                        code=audit.ErrorCode.PARENT_REQUIRED,
+                        message=audit.Message.PARENT_REQUIRED,
+                        detailed_error=resource.DetailedError(value=EMPTY_RESOURCE_REF),
+                    ),
+                    id=f"{resource_type}: parent required",
+                )
+                for resource_type, event_type in note_and_reminder_create_event_types.items()
+            ],
+            *[
+                pytest.param(
+                    _validation_case(
+                        _make_create_request(
+                            resource_type=resource_type,
+                            resource_id=str(uuid.uuid4()),
+                            request_id=str(uuid.uuid4()),
+                            event_type=event_type,
+                            owner=resource.ResourceRef(
+                                type=fields.ResourceType.USER, id=NOTE_OWNER_ID
+                            ),
+                            parent=resource.ResourceRef(
+                                type=fields.ResourceType.USER, id=NOTE_SPACE_ID
+                            ),
+                        ),
+                        code=audit.ErrorCode.PARENT_TYPE_INVALID,
+                        message=audit.Message.PARENT_TYPE_INVALID,
+                        detailed_error=resource.DetailedError(
+                            value=resource.ResourceRef(
+                                type=fields.ResourceType.USER, id=NOTE_SPACE_ID
+                            ),
+                        ),
+                    ),
+                    id=f"{resource_type}: parent type invalid",
+                )
+                for resource_type, event_type in note_and_reminder_create_event_types.items()
+            ],
+            *[
+                pytest.param(
+                    _validation_case(
+                        _make_create_request(
+                            resource_type=resource_type,
+                            resource_id=str(uuid.uuid4()),
+                            request_id=str(uuid.uuid4()),
+                            event_type=event_type,
+                            owner=resource.ResourceRef(
+                                type=fields.ResourceType.USER, id=NOTE_OWNER_ID
+                            ),
+                            parent=resource.ResourceRef(
+                                type=fields.ResourceType.SPACE, id=NOTE_SPACE_ID
+                            ),
+                            change_type=fields.ChangeType.MEMBERSHIP_CHANGED,
+                            operation=fields.Operation.UPDATE,
+                        ),
+                        code=audit.ErrorCode.CHANGE_TYPE_INVALID,
+                        message=audit.Message.CHANGE_TYPE_INVALID,
+                        detailed_error=resource.DetailedError(
+                            message=_change_type_mismatch_message(
+                                fields.NOTE_AND_REMINDER_CHANGE_TYPES,
+                                fields.ChangeType.MEMBERSHIP_CHANGED,
+                            ),
+                            value=fields.ChangeType.MEMBERSHIP_CHANGED,
+                        ),
+                    ),
+                    id=f"{resource_type}: change type not allowed",
+                )
+                for resource_type, event_type in note_and_reminder_create_event_types.items()
+            ],
+            *[
+                pytest.param(
+                    _validation_case(
+                        _make_create_request(
+                            resource_type=resource_type,
+                            resource_id=str(uuid.uuid4()),
+                            request_id=str(uuid.uuid4()),
+                            event_type=wrong_event_type,
+                            owner=resource.ResourceRef(
+                                type=fields.ResourceType.USER, id=NOTE_OWNER_ID
+                            ),
+                            parent=resource.ResourceRef(
+                                type=fields.ResourceType.SPACE, id=NOTE_SPACE_ID
+                            ),
+                        ),
+                        code=audit.ErrorCode.EVENT_TYPE_INVALID,
+                        message=audit.Message.EVENT_TYPE_INVALID,
+                        detailed_error=resource.DetailedError(
+                            message=_event_type_mismatch_message(
+                                expected_event_type, wrong_event_type
+                            ),
+                            value=wrong_event_type,
+                        ),
+                    ),
+                    id=f"{resource_type}: event type mismatch",
+                )
+                for resource_type, expected_event_type in note_and_reminder_create_event_types.items()
+                for wrong_event_type in (wrong_create_event_types[resource_type],)
+            ],
+            pytest.param(
+                _validation_case(
+                    _make_create_request(
+                        resource_type=fields.ResourceType.SPACE,
+                        resource_id=str(uuid.uuid4()),
+                        request_id=str(uuid.uuid4()),
+                        event_type=fields.EventType.SPACE_CREATED,
+                        owner=None,
+                        parent=None,
+                    ),
+                    code=audit.ErrorCode.OWNER_REQUIRED,
+                    message=audit.Message.OWNER_REQUIRED,
+                    detailed_error=resource.DetailedError(value=EMPTY_RESOURCE_REF),
+                ),
+                id="space: owner required",
+            ),
+            pytest.param(
+                _validation_case(
+                    _make_create_request(
+                        resource_type=fields.ResourceType.SPACE,
+                        resource_id=str(uuid.uuid4()),
+                        request_id=str(uuid.uuid4()),
+                        event_type=fields.EventType.SPACE_CREATED,
+                        owner=resource.ResourceRef(
+                            type=fields.ResourceType.USER,
+                            id=ids.PERSONAL_SPACE_OWNER_UUID,
+                        ),
+                        parent=resource.ResourceRef(
+                            type=fields.ResourceType.SPACE, id=NOTE_SPACE_ID
+                        ),
+                    ),
+                    code=audit.ErrorCode.PARENT_NOT_ALLOWED,
+                    message=audit.Message.PARENT_NOT_ALLOWED,
+                    detailed_error=resource.DetailedError(
+                        message="spaces do not have parents, only owners",
+                        value=resource.ResourceRef(
+                            type=fields.ResourceType.SPACE, id=NOTE_SPACE_ID
+                        ),
+                    ),
+                ),
+                id="space: parent not allowed",
+            ),
+            pytest.param(
+                _validation_case(
+                    _make_create_request(
+                        resource_type=fields.ResourceType.SPACE,
+                        resource_id=str(uuid.uuid4()),
+                        request_id=str(uuid.uuid4()),
+                        event_type=fields.EventType.SPACE_CREATED,
+                        owner=resource.ResourceRef(
+                            type=fields.ResourceType.USER,
+                            id=ids.PERSONAL_SPACE_OWNER_UUID,
+                        ),
+                        parent=None,
+                        change_type=fields.ChangeType.RESOURCE_MOVED,
+                        operation=fields.Operation.UPDATE,
+                    ),
+                    code=audit.ErrorCode.CHANGE_TYPE_INVALID,
+                    message=audit.Message.CHANGE_TYPE_INVALID,
+                    detailed_error=resource.DetailedError(
+                        message=_change_type_mismatch_message(
+                            fields.SPACE_CHANGE_TYPES,
+                            fields.ChangeType.RESOURCE_MOVED,
+                        ),
+                        value=fields.ChangeType.RESOURCE_MOVED,
+                    ),
+                ),
+                id="space: change type not allowed",
+            ),
+            pytest.param(
+                _validation_case(
+                    _make_create_request(
+                        resource_type=fields.ResourceType.SPACE,
+                        resource_id=str(uuid.uuid4()),
+                        request_id=str(uuid.uuid4()),
+                        event_type=fields.EventType.SPACE_UPDATED,
+                        owner=resource.ResourceRef(
+                            type=fields.ResourceType.USER,
+                            id=ids.PERSONAL_SPACE_OWNER_UUID,
+                        ),
+                        parent=None,
+                    ),
+                    code=audit.ErrorCode.EVENT_TYPE_INVALID,
+                    message=audit.Message.EVENT_TYPE_INVALID,
+                    detailed_error=resource.DetailedError(
+                        message=_event_type_mismatch_message(
+                            fields.EventType.SPACE_CREATED,
+                            fields.EventType.SPACE_UPDATED,
+                        ),
+                        value=fields.EventType.SPACE_UPDATED,
+                    ),
+                ),
+                id="space: event type mismatch",
+            ),
+        ],
+    )
+    def test_update_resource_validation_errors(
+        self,
+        case: ValidationErrorCase,
+        login: str,
+        auth_service_v0_api_client: AuthServiceV0APIClient,
+        auth_service_error_messages_from_rabbitmq: ContextManager[Optional[bytes]],
+    ) -> None:
+        """
+        Тест на валидацию запросов update_resource при создании ресурсов.
+
+        Заметки и напоминания:
+        - обязательны relations.owner (type=user) и relations.parent (type=space)
+        - change_type только из NOTE_AND_REMINDER_CHANGE_TYPES
+        - event_type должен соответствовать операции (для create — *_CREATED)
+
+        Пространства:
+        - обязателен owner, parent запрещён
+        - change_type только из SPACE_CHANGE_TYPES
+        - event_type должен соответствовать операции
+        """
+        response = auth_service_v0_api_client.update_resource(
+            asdict(case.request),
+            token=login,
+            x_telegram_user_id=ids.ADMIN_USER_ID,
+        )
+        log_internal_server_error(response, logger, fields.ERROR_FIELD)
+
+        with auth_service_error_messages_from_rabbitmq as rabbitmq_message:
+            assert rabbitmq_message is not None
+
+        assert response.status_code == case.expected_status_code, response.text
+        resource.assert_api_response(response.json(), case.expected_response)

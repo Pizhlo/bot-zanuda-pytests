@@ -39,6 +39,7 @@ CAN_EDIT_FIELD = "can_edit"
 NOTES_SERVICE_NAME = "notes-service"
 class ResourceType(StrEnum):
     NOTE = "note"
+    REMINDER = "reminder"
     SPACE = "space"
     USER = "user"
 
@@ -53,11 +54,25 @@ class Operation(StrEnum):
 
 class ChangeType(StrEnum):
     RESOURCE_ADDED = "resource_added"
-    RESOURCE_UPDATED = "resource_updated"
-    RESOURCE_DELETED = "resource_deleted"
+    RESOURCE_REMOVED = "resource_removed"
+    RESOURCE_MOVED = "resource_moved"
     MEMBERSHIP_ADDED = "membership_added"
     MEMBERSHIP_REMOVED = "membership_removed"
     MEMBERSHIP_CHANGED = "membership_changed"
+
+# Допустимые change_type: явные списки, чтобы ловить появление новых значений в API.
+NOTE_AND_REMINDER_CHANGE_TYPES = (
+    ChangeType.RESOURCE_ADDED,
+    ChangeType.RESOURCE_REMOVED,
+    ChangeType.RESOURCE_MOVED,
+)
+SPACE_CHANGE_TYPES = (
+    ChangeType.RESOURCE_ADDED,
+    ChangeType.RESOURCE_REMOVED,
+    ChangeType.MEMBERSHIP_CHANGED,
+    ChangeType.MEMBERSHIP_ADDED,
+    ChangeType.MEMBERSHIP_REMOVED,
+)
 
 class Status(StrEnum):
     COMPLETED = "completed"
@@ -69,4 +84,11 @@ class OperationResult(StrEnum):
 
 class EventType(StrEnum):
     NOTE_CREATED = "NOTE_CREATED"
+    NOTE_UPDATED = "NOTE_UPDATED"
+    NOTE_DELETED = "NOTE_DELETED"
+    REMINDER_CREATED = "REMINDER_CREATED"
+    REMINDER_UPDATED = "REMINDER_UPDATED"
+    REMINDER_DELETED = "REMINDER_DELETED"
     SPACE_CREATED = "SPACE_CREATED"
+    SPACE_UPDATED = "SPACE_UPDATED"
+    SPACE_DELETED = "SPACE_DELETED"
