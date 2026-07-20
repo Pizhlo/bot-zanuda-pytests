@@ -24,6 +24,13 @@ class ErrorCode(StrEnum):
     USER_NOT_FOUND="USER_NOT_FOUND"
     RESOURCE_ALREADY_EXISTS_OR_NOT_FOUND = "RESOURCE_ALREADY_EXISTS_OR_NOT_FOUND"
     NO_TUPLES_TO_WRITE_OR_DELETE = "NO_TUPLES_TO_WRITE_OR_DELETE"
+    OWNER_REQUIRED = "OWNER_REQUIRED"
+    PARENT_REQUIRED = "PARENT_REQUIRED"
+    CHANGE_TYPE_INVALID = "CHANGE_TYPE_INVALID"
+    EVENT_TYPE_INVALID = "EVENT_TYPE_INVALID"
+    PARENT_NOT_ALLOWED = "PARENT_NOT_ALLOWED"
+    OWNER_TYPE_INVALID = "OWNER_TYPE_INVALID"
+    PARENT_TYPE_INVALID = "PARENT_TYPE_INVALID"
 
 class Operation(StrEnum):
     """Перечисление операций"""
@@ -56,6 +63,13 @@ class Message(StrEnum):
     NO_TUPLES_TO_WRITE_OR_DELETE="no tuples to write or delete"
     USER_NOT_FOUND="user not found"
     NOT_FOUND="not found"
+    OWNER_REQUIRED="owner is required"
+    PARENT_REQUIRED="parent is required"
+    CHANGE_TYPE_INVALID="change type is invalid"
+    EVENT_TYPE_INVALID="event type is invalid"
+    PARENT_NOT_ALLOWED="parent is not allowed"
+    OWNER_TYPE_INVALID="owner type is invalid: must be user"
+    PARENT_TYPE_INVALID="parent type is invalid: must be space"
 
 class Status(StrEnum):
     """Перечисление статусов событий"""

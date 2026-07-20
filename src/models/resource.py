@@ -25,8 +25,8 @@ class ResourceRef:
 class ResourceRelations:
     """Связи ресурса с другими сущностями."""
 
-    owner: ResourceRef
-    parent: ResourceRef | None
+    owner: ResourceRef | None = None
+    parent: ResourceRef | None = None
 
 
 @dataclass(frozen=True)
@@ -80,10 +80,19 @@ class ResourceChangeResponse:
 
 
 @dataclass(frozen=True)
+class DetailedError:
+    """Детали валидационной ошибки из auth-service."""
+
+    message: str = ""
+    value: Any = None # noqa: WPS110 # такое название в API
+
+
+@dataclass(frozen=True)
 class ResourceChangeErrorDetails:
     """Детали ошибки изменения ресурса."""
 
     operation: str
+    detailed_error: DetailedError | None = None
 
 
 @dataclass(frozen=True)
