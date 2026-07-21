@@ -164,7 +164,11 @@ def assert_api_response(
     expected: ResourceChangeResponse | ResourceChangeErrorResponse,
 ) -> None:
     """Сравнивает ответ API с ожидаемым dataclass, игнорируя meta.auth_model_id."""
-    assert _without_auth_model_id(actual) == _without_auth_model_id(to_api_dict(expected))
+    actual_normalized = _without_auth_model_id(actual)
+    expected_normalized = _without_auth_model_id(to_api_dict(expected))
+    assert actual_normalized == expected_normalized, (
+        f"API response mismatch:\nactual={actual_normalized}\nexpected={expected_normalized}"
+    )
 
     if expected.meta.auth_model_id is not None:
         assert actual.get("meta", {}).get("auth_model_id") == expected.meta.auth_model_id
