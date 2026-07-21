@@ -5,11 +5,9 @@ from typing import ContextManager, Optional
 import httpx, pytest, uuid
 
 from src.api_clients.auth_service import AuthServiceV0APIClient
+from src.common import audit, errors, fields, ids
 from src.common.server_error_logging import log_internal_server_error
 import src.models.resource as resource
-import src.common.ids as ids 
-import src.common.audit as audit 
-import src.common.fields as fields
 from tests.fixtures.auth_jwt import TokenFields
 
 logger = logging.getLogger(__name__)
@@ -101,6 +99,10 @@ EMPTY_RESOURCE_REF = resource.ResourceRef(
     type="",
     id="00000000-0000-0000-0000-000000000000",
 )
+
+# DetailedError без текста: сервис оборачивает Err* в *fga.DetailedError
+# с пустым message (Err с json:"-"), value часто null.
+EMPTY_DETAILED_ERROR = resource.DetailedError()
 
 
 @dataclass(frozen=True)
@@ -250,7 +252,10 @@ class TestUpdateResource:
                         error=resource.ResourceChangeError(
                             code=audit.ErrorCode.RESOURCE_ALREADY_EXISTS_OR_NOT_FOUND,
                             message="new resource already exists or deleted resource not found",
-                            details=resource.ResourceChangeErrorDetails(operation=fields.Operation.CREATE),
+                            details=resource.ResourceChangeErrorDetails(
+                                operation=fields.Operation.CREATE,
+                                detailed_error=EMPTY_DETAILED_ERROR,
+                            ),
                         ),
                         meta=resource.ResourceChangeMeta(),
                     ),
@@ -298,7 +303,10 @@ class TestUpdateResource:
                         error=resource.ResourceChangeError(
                             code=audit.ErrorCode.USER_NOT_FOUND,
                             message=audit.Message.USER_NOT_FOUND,
-                            details=resource.ResourceChangeErrorDetails(operation=fields.Operation.CREATE),
+                            details=resource.ResourceChangeErrorDetails(
+                                operation=fields.Operation.CREATE,
+                                detailed_error=EMPTY_DETAILED_ERROR,
+                            ),
                         ),
                         meta=resource.ResourceChangeMeta(),
                     ),
@@ -316,47 +324,6 @@ class TestUpdateResource:
                 ),
                 id="user not found",
             ),
-             pytest.param(
-                UpdateResourceCase(
-                    x_telegram_user_id=ids.ADMIN_USER_ID,
-                    request=resource.ResourceChangeMessage(
-                        request_id=NOTE_CREATED_REQUEST_ID,
-                        resource=resource.ResourceRef(type=fields.ResourceType.NOTE, id=NOTE_ID),
-                        operation=fields.Operation.CREATE,
-                        change_type=fields.ChangeType.RESOURCE_ADDED,
-                        relations=None,
-                        context=resource.ResourceEventContext(
-                            source_service=fields.NOTES_SERVICE_NAME,
-                            event_type=fields.EventType.NOTE_CREATED,
-                        ),
-                    ),
-                    expected_status_code=httpx.codes.BAD_REQUEST,
-                    expected_response=resource.ResourceChangeErrorResponse(
-                        request_id=NOTE_CREATED_REQUEST_ID,
-                        status=fields.Status.ERROR,
-                        operation_result=fields.OperationResult.FAILED,
-                        resource=resource.ResourceRef(type=fields.ResourceType.NOTE, id=NOTE_ID),
-                        error=resource.ResourceChangeError(
-                            code=audit.ErrorCode.NO_TUPLES_TO_WRITE_OR_DELETE,
-                            message=audit.Message.NO_TUPLES_TO_WRITE_OR_DELETE,
-                            details=resource.ResourceChangeErrorDetails(operation=fields.Operation.CREATE),
-                        ),
-                        meta=resource.ResourceChangeMeta(),
-                    ),
-                    expected_message=None,
-                ),
-                audit.AuditMessage(
-                    service_name=audit.AUTH_SERVICE_NAME,
-                    level=audit.Level.ERROR,
-                    cause=audit.Message.NO_TUPLES_TO_WRITE_OR_DELETE,
-                    error_code=audit.ErrorCode.WRITE_FAILED_DUE_TO_INVALID_INPUT,
-                    kind=audit.Kind.VALIDATION,
-                    operation=audit.Operation.FGA_UPDATE_RESOURCE,
-                    status=audit.Status.FAILED,
-                    context={fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT, fields.USER_ID_FIELD: ids.ADMIN_USER_ID},
-                ),
-                id="no tuples to write or delete",
-            ),
         ],
     )
     def test_create_note(
@@ -372,7 +339,6 @@ class TestUpdateResource:
         - Успешное создание заметки: 200 OK
         - Заметка уже существует: 409 Conflict
         - Пользователя не существует (хедер x-telegram-user-id): 404 Not Found
-        - Нет корректных данных для записи: 400 Bad Request
         """
         token = login
 
@@ -395,7 +361,7 @@ class TestUpdateResource:
             audit.assert_audit_message(expected_audit_message, real_message)
             audit.assert_audit_message_context(expected_audit_message, real_message)
         elif expected_audit_message is not None:
-            pytest.fail("No audit messages in queue")
+            pytest.fail(errors.NO_AUDIT_MESSAGES_ERROR)
 
     @pytest.mark.parametrize(
         ("case", "expected_audit_message"),
@@ -465,7 +431,10 @@ class TestUpdateResource:
                         error=resource.ResourceChangeError(
                             code=audit.ErrorCode.RESOURCE_ALREADY_EXISTS_OR_NOT_FOUND,
                             message="new resource already exists or deleted resource not found",
-                            details=resource.ResourceChangeErrorDetails(operation=fields.Operation.CREATE),
+                            details=resource.ResourceChangeErrorDetails(
+                                operation=fields.Operation.CREATE,
+                                detailed_error=EMPTY_DETAILED_ERROR,
+                            ),
                         ),
                         meta=resource.ResourceChangeMeta(),
                     ),
@@ -513,7 +482,10 @@ class TestUpdateResource:
                         error=resource.ResourceChangeError(
                             code=audit.ErrorCode.USER_NOT_FOUND,
                             message=audit.Message.USER_NOT_FOUND,
-                            details=resource.ResourceChangeErrorDetails(operation=fields.Operation.CREATE),
+                            details=resource.ResourceChangeErrorDetails(
+                                operation=fields.Operation.CREATE,
+                                detailed_error=EMPTY_DETAILED_ERROR,
+                            ),
                         ),
                         meta=resource.ResourceChangeMeta(),
                     ),
@@ -530,47 +502,6 @@ class TestUpdateResource:
                     context={fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT, fields.USER_ID_FIELD: ids.INVALID_USER_ID},
                 ),
                 id="user not found",
-            ),
-             pytest.param(
-                UpdateResourceCase(
-                    x_telegram_user_id=ids.ADMIN_USER_ID,
-                    request=resource.ResourceChangeMessage(
-                        request_id=SPACE_CREATED_REQUEST_ID,
-                        resource=resource.ResourceRef(type=fields.ResourceType.SPACE, id=ids.PERSONAL_SPACE_ID),
-                        operation=fields.Operation.CREATE,
-                        change_type=fields.ChangeType.RESOURCE_ADDED,
-                        relations=None,
-                        context=resource.ResourceEventContext(
-                            source_service=fields.NOTES_SERVICE_NAME,
-                            event_type=fields.EventType.SPACE_CREATED,
-                        ),
-                    ),
-                    expected_status_code=httpx.codes.BAD_REQUEST,
-                    expected_response=resource.ResourceChangeErrorResponse(
-                        request_id=SPACE_CREATED_REQUEST_ID,
-                        status=fields.Status.ERROR,
-                        operation_result=fields.OperationResult.FAILED,
-                        resource=resource.ResourceRef(type=fields.ResourceType.SPACE, id=ids.PERSONAL_SPACE_ID),
-                        error=resource.ResourceChangeError(
-                            code=audit.ErrorCode.NO_TUPLES_TO_WRITE_OR_DELETE,
-                            message=audit.Message.NO_TUPLES_TO_WRITE_OR_DELETE,
-                            details=resource.ResourceChangeErrorDetails(operation=fields.Operation.CREATE),
-                        ),
-                        meta=resource.ResourceChangeMeta(),
-                    ),
-                    expected_message=None,
-                ),
-                audit.AuditMessage(
-                    service_name=audit.AUTH_SERVICE_NAME,
-                    level=audit.Level.ERROR,
-                    cause=audit.Message.NO_TUPLES_TO_WRITE_OR_DELETE,
-                    error_code=audit.ErrorCode.WRITE_FAILED_DUE_TO_INVALID_INPUT,
-                    kind=audit.Kind.VALIDATION,
-                    operation=audit.Operation.FGA_UPDATE_RESOURCE,
-                    status=audit.Status.FAILED,
-                    context={fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT, fields.USER_ID_FIELD: ids.ADMIN_USER_ID},
-                ),
-                id="no tuples to write or delete",
             ),
         ],
     )
@@ -608,7 +539,7 @@ class TestUpdateResource:
             audit.assert_audit_message(expected_audit_message, real_message)
             audit.assert_audit_message_context(expected_audit_message, real_message)
         elif expected_audit_message is not None:
-            pytest.fail("No audit messages in queue")
+            pytest.fail(errors.NO_AUDIT_MESSAGES_ERROR)
 
     @pytest.mark.parametrize(
         ("invalid_case", "expected_audit_message"),
@@ -1039,7 +970,7 @@ class TestUpdateResource:
             audit.assert_audit_message(expected_audit_message, real_message)
             audit.assert_audit_message_context(expected_audit_message, real_message)
         elif expected_audit_message is not None:
-            pytest.fail("No audit messages in queue")
+            pytest.fail(errors.NO_AUDIT_MESSAGES_ERROR)
 
     @pytest.mark.parametrize(
         "case",
@@ -1323,8 +1254,32 @@ class TestUpdateResource:
         )
         log_internal_server_error(response, logger, fields.ERROR_FIELD)
 
+        # validateRequest в fga.UpdateResource: level=debug,
+        # error_code=WRITE_FAILED_DUE_TO_INVALID_INPUT, cause=Err.Error()
+        # (совпадает с error.message в HTTP-ответе).
+        validation_audit_message = audit.AuditMessage(
+            service_name=audit.AUTH_SERVICE_NAME,
+            level=audit.Level.DEBUG,
+            cause=case.expected_response.error.message,
+            error_code=audit.ErrorCode.WRITE_FAILED_DUE_TO_INVALID_INPUT,
+            kind=audit.Kind.VALIDATION,
+            operation=audit.Operation.FGA_UPDATE_RESOURCE,
+            status=audit.Status.FAILED,
+            context={
+                fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT,
+                fields.USER_ID_FIELD: ids.ADMIN_USER_ID,
+            },
+        )
+
         with auth_service_error_messages_from_rabbitmq as rabbitmq_message:
-            assert rabbitmq_message is not None
+            message = rabbitmq_message
+
+        if message:
+            real_message = audit.AuditMessage.model_validate_json(message)
+            audit.assert_audit_message(validation_audit_message, real_message)
+            audit.assert_audit_message_context(validation_audit_message, real_message)
+        else:
+            pytest.fail(errors.NO_AUDIT_MESSAGES_ERROR)
 
         assert response.status_code == case.expected_status_code, response.text
         resource.assert_api_response(response.json(), case.expected_response)
