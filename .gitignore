@@ -78,4 +78,7 @@ Thumbs.db
 config.yaml
 config.yml
 
+# для локального запуска
 .env
+*.yaml
+configs/* 
