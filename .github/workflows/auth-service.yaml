@@ -1,4 +1,4 @@
-name: Тесты auth-service
+name: Проверка вывода pytest при намеренных ошибках
 
 on:
   push:
@@ -16,14 +16,19 @@ jobs:
   auth-service:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        fault: [setup, pytest]
     permissions:
       contents: read
     env:
       CI: 'true'
+      TESTKIT_FAULT: ${{ matrix.fault }}
       # Ручной запуск позволяет проверить тестовый тег без обновления latest.
       AUTH_IMAGE: ${{ inputs.auth_image || 'pizhlo/bot-zanuda-auth-service:latest' }}
       # Повторный запуск задания получает новый изолированный проект.
-      RUN_ID: auth-${{ github.run_id }}-${{ github.run_attempt }}
+      RUN_ID: auth-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.fault }}
     steps:
       - name: Получить код и закреплённый testkit
         uses: actions/checkout@v4
@@ -35,8 +40,33 @@ jobs:
           persist-credentials: false
       - name: Установить зависимость скрипта запуска
         run: sudo apt-get update && sudo apt-get install -y python3-yaml
+      - name: Внести намеренную ошибку только в проверочный checkout
+        run: |
+          if [ "$TESTKIT_FAULT" = setup ]; then
+            python3 - <<'CHECK'
+          from pathlib import Path
+          import yaml
+          path = Path('testkit/configs/auth-service/config.yaml')
+          config = yaml.safe_load(path.read_text())
+          config['postgres']['db_name'] = 'controlled_missing_database'
+          path.write_text(yaml.safe_dump(config))
+          CHECK
+          else
+            cat > tests/auth_service/test_controlled_failure.py <<'CHECK'
+          def test_controlled_failure():
+              """Намеренный провал для проверки видимости ошибки pytest в Actions."""
+              assert False, "CONTROLLED FAILURE: проверка вывода pytest"
+          CHECK
+          fi
       - name: Выполнить полный прогон тестов auth-service
-        run: make integration-run
+        id: integration
+        run: |
+          set +e
+          make integration-run
+          code=$?
+          set -e
+          cp "$GITHUB_STEP_SUMMARY" "$RUNNER_TEMP/pytest-summary.md"
+          exit "$code"
       # Дополнительная диагностика, если общий runner завершился раньше подготовки/уборки.
       - name: Собрать оставшиеся логи
         if: always()
@@ -51,3 +81,24 @@ jobs:
           if [ -f testkit/Makefile ]; then
             make integration-down
           fi
+      - name: Проверить ожидаемый провал, сводку и отсутствие ресурсов
+        if: always()
+        env:
+          INTEGRATION_OUTCOME: ${{ steps.integration.outcome }}
+        run: |
+          test "$INTEGRATION_OUTCOME" = failure
+          python3 - <<'CHECK'
+          from pathlib import Path
+          import os
+          import subprocess
+          summary = (Path(os.environ['RUNNER_TEMP']) / 'pytest-summary.md').read_text()
+          expected = 'не запускался' if os.environ['TESTKIT_FAULT'] == 'setup' else '1 failed, 86 passed'
+          assert expected in summary, summary
+          for kind in ('container', 'network', 'volume'):
+              args = ['docker', kind, 'ls', '-q']
+              if kind == 'container':
+                  args.append('-a')
+              args += ['--filter', 'label=com.docker.compose.project=' + os.environ['RUN_ID']]
+              assert not subprocess.check_output(args, text=True).strip(), kind
+          print('EXPECTED FAILURE: сводка корректна; контейнеры, сети и тома удалены.')
+          CHECK
