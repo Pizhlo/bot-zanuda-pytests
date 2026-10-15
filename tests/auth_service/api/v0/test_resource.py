@@ -1,6 +1,6 @@
 import logging, time  
-from dataclasses import asdict, dataclass
-from collections.abc import Callable
+from dataclasses import asdict, dataclass, replace
+from collections.abc import Callable, Generator
 from typing import ContextManager, Optional
 import httpx, pytest, uuid
 
@@ -9,24 +9,28 @@ from src.common import audit, errors, fields, ids
 from src.common.server_error_logging import log_internal_server_error
 import src.models.resource as resource
 from tests.fixtures.auth_jwt import TokenFields
+from tests.fixtures.openfga import remove_resource_relations
 
 logger = logging.getLogger(__name__)
 
+# Новые ID отделяют записи этого pytest от прерванных прежних запусков.
+# Фикстура isolated_resource удаляет успешно созданные связи после каждого сценария.
 NOTE_CREATED_REQUEST_ID = str(uuid.uuid4())
 NOTE_OWNER_ID = ids.SHARED_SPACE_OWNER_UUID
 NOTE_SPACE_ID = ids.SHARED_SPACE_ID
-NOTE_ID = "1776f52a-8ce0-4bcd-9b75-0d3f2606883a"
+NOTE_ID = str(uuid.uuid4())
 
 NOTE_OWNER_SUBJECT = resource.format_ref(fields.ResourceType.USER, NOTE_OWNER_ID)
 NOTE_RESOURCE = resource.format_ref(fields.ResourceType.NOTE, NOTE_ID)
 NOTE_SPACE_SUBJECT = resource.format_ref(fields.ResourceType.SPACE, NOTE_SPACE_ID)
 
 SPACE_OWNER_SUBJECT = resource.format_ref(fields.ResourceType.USER, ids.PERSONAL_SPACE_OWNER_UUID)
-SPACE_RESOURCE = resource.format_ref(fields.ResourceType.SPACE, ids.PERSONAL_SPACE_ID)
+SPACE_ID = str(uuid.uuid4())
+SPACE_RESOURCE = resource.format_ref(fields.ResourceType.SPACE, SPACE_ID)
 
 REMINDER_OWNER_ID = ids.SHARED_SPACE_OWNER_UUID
 REMINDER_SPACE_ID = ids.SHARED_SPACE_ID
-REMINDER_ID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+REMINDER_ID = str(uuid.uuid4())
 
 REMINDER_OWNER_SUBJECT = resource.format_ref(fields.ResourceType.USER, REMINDER_OWNER_ID)
 REMINDER_RESOURCE = resource.format_ref(fields.ResourceType.REMINDER, REMINDER_ID)
@@ -49,12 +53,17 @@ wrong_create_event_types = {
 
 
 def _change_type_mismatch_message(allowed: tuple[str, ...], got: str) -> str:
+    """Собирает ожидаемую ошибку типа изменения в формате ответа API.
+
+    Сохраняет порядок допустимых значений, чтобы проверки сравнивали точный контракт.
+    """
     return (
         f"change type mismatch: expected one of `{', '.join(allowed)}`, got `{got}`"
     )
 
 
 def _event_type_mismatch_message(expected: str, got: str) -> str:
+    """Собирает ожидаемую ошибку события для негативных сценариев API."""
     return f"event type mismatch: expected `{expected}`, got `{got}`"
 
 
@@ -69,6 +78,11 @@ def _make_create_request( # noqa: WPS211
     change_type: str = fields.ChangeType.RESOURCE_ADDED,
     operation: str = fields.Operation.CREATE,
 ) -> resource.ResourceChangeMessage:
+    """Создаёт типизированный запрос для параметризованных сценариев создания.
+
+    Явные overrides позволяют менять проверяемое поле, сохраняя остальные части
+    запроса одинаковыми и не дублируя структуру сообщения в каждом сценарии.
+    """
     return resource.ResourceChangeMessage(
         request_id=request_id,
         resource=resource.ResourceRef(type=resource_type, id=resource_id),
@@ -130,6 +144,11 @@ def _validation_error_response(
     message: str,
     detailed_error: resource.DetailedError | None = None,
 ) -> resource.ResourceChangeErrorResponse:
+    """Строит ожидаемый ответ валидации с контекстом исходного запроса.
+
+    Идентификаторы и операция берутся из запроса; код и детали ошибки задаёт
+    сценарий, чтобы проверять контракт сервиса, а не отдельные поля вручную.
+    """
     return resource.ResourceChangeErrorResponse(
         request_id=request.request_id,
         status=fields.Status.ERROR,
@@ -154,6 +173,10 @@ def _validation_case(
     message: str,
     detailed_error: resource.DetailedError | None = None,
 ) -> ValidationErrorCase:
+    """Объединяет запрос и ожидаемую ошибку в параметр негативного теста.
+
+    Общий конструктор сохраняет стандартный статус 400 и одинаковую форму ответа.
+    """
     return ValidationErrorCase(
         request=request,
         expected_response=_validation_error_response(
@@ -179,6 +202,43 @@ DEFAULT_UPDATE_RESOURCE_REQUEST = resource.ResourceChangeMessage(
         event_type=fields.EventType.NOTE_CREATED,
     ),
 )
+
+
+@pytest.fixture()
+def isolated_resource(
+    case: UpdateResourceCase,
+    login: str,
+    auth_service_v0_api_client: AuthServiceV0APIClient,
+    openfga: httpx.Client,
+) -> Generator[None, None, None]:
+    """Готовит и удаляет только ресурс текущего сценария создания.
+
+    Базовая SQL-фикстура не очищает связи ресурсов в OpenFGA. Поэтому
+    после сценария удаляем свои связи напрямую в OpenFGA: delete в API сервиса
+    пока не реализован. Базовые данные и модель сервиса остаются нетронутыми.
+    Сценарий 409 сам создаёт ресурс заранее: он работает отдельно от сценария 200
+    и не зависит от порядка pytest. Чужие ресурсы и SQL-данные не затрагиваются.
+    Новый UUID также не конфликтует с остатками аварийно прерванного pytest.
+    Подготовка 409 входит в try: даже при ошибке запроса/статуса до yield
+    finally пытается убрать уже записанные связи, а setup остаётся неуспешным.
+    """
+    if case.expected_status_code not in (httpx.codes.OK, httpx.codes.CONFLICT):
+        yield
+        return
+    client = auth_service_v0_api_client
+    # Подготовка и yield требуют одного finally: раздельные блоки оставят окно без очистки.
+    try:  # noqa: WPS229
+        if case.expected_status_code == httpx.codes.CONFLICT:
+            preparation = replace(case.request, request_id=str(uuid.uuid4()))
+            response = client.update_resource(
+                asdict(preparation), token=login, x_telegram_user_id=case.x_telegram_user_id,
+            )
+            assert response.status_code == httpx.codes.OK, response.text
+        yield
+    finally:
+        remove_resource_relations(
+            openfga, resource.format_ref(case.request.resource.type, case.request.resource.id),
+        )
 
 
 class TestUpdateResource:
@@ -335,6 +395,7 @@ class TestUpdateResource:
             ),
         ],
     )
+    @pytest.mark.usefixtures("isolated_resource")
     def test_create_note(
         self,
         case: UpdateResourceCase,
@@ -380,7 +441,7 @@ class TestUpdateResource:
                     x_telegram_user_id=ids.ADMIN_USER_ID,
                     request=resource.ResourceChangeMessage(
                         request_id=SPACE_CREATED_REQUEST_ID,
-                        resource=resource.ResourceRef(type=fields.ResourceType.SPACE, id=ids.PERSONAL_SPACE_ID),
+                        resource=resource.ResourceRef(type=fields.ResourceType.SPACE, id=SPACE_ID),
                         operation=fields.Operation.CREATE,
                         change_type=fields.ChangeType.RESOURCE_ADDED,
                         relations=resource.ResourceRelations(
@@ -398,7 +459,7 @@ class TestUpdateResource:
                         idempotency_key="",
                         status=fields.Status.COMPLETED,
                         operation_result=fields.OperationResult.APPLIED,
-                        resource=resource.ResourceRef(type=fields.ResourceType.SPACE, id=ids.PERSONAL_SPACE_ID),
+                        resource=resource.ResourceRef(type=fields.ResourceType.SPACE, id=SPACE_ID),
                         written_tuples=(
                             resource.AuthTuple(
                                 subject=SPACE_OWNER_SUBJECT,
@@ -419,7 +480,7 @@ class TestUpdateResource:
                     x_telegram_user_id=ids.ADMIN_USER_ID,
                     request=resource.ResourceChangeMessage(
                         request_id=SPACE_CREATED_REQUEST_ID,
-                        resource=resource.ResourceRef(type=fields.ResourceType.SPACE, id=ids.PERSONAL_SPACE_ID),
+                        resource=resource.ResourceRef(type=fields.ResourceType.SPACE, id=SPACE_ID),
                         operation=fields.Operation.CREATE,
                         change_type=fields.ChangeType.RESOURCE_ADDED,
                         relations=resource.ResourceRelations(
@@ -436,7 +497,7 @@ class TestUpdateResource:
                         request_id=SPACE_CREATED_REQUEST_ID,
                         status=fields.Status.ERROR,
                         operation_result=fields.OperationResult.FAILED,
-                        resource=resource.ResourceRef(type=fields.ResourceType.SPACE, id=ids.PERSONAL_SPACE_ID),
+                        resource=resource.ResourceRef(type=fields.ResourceType.SPACE, id=SPACE_ID),
                         error=resource.ResourceChangeError(
                             code=audit.ErrorCode.RESOURCE_ALREADY_EXISTS_OR_NOT_FOUND,
                             message="new resource already exists or deleted resource not found",
@@ -454,8 +515,8 @@ class TestUpdateResource:
                     level=audit.Level.ERROR,
                     cause=(
                         f'POST validation error for Write POST with body {{"code":"write_failed_due_to_invalid_input",'
-                        f'"message":"cannot write a tuple which already exists: user: \'user:{ids.PERSONAL_SPACE_OWNER_UUID}\', relation: \'owner\', object: \'space:{ids.PERSONAL_SPACE_ID}\': tuple to be written already existed or the tuple to be deleted did not exist"}}\n'
-                        f" with error code write_failed_due_to_invalid_input error message: cannot write a tuple which already exists: user: 'user:{ids.PERSONAL_SPACE_OWNER_UUID}', relation: 'owner', object: 'space:{ids.PERSONAL_SPACE_ID}': tuple to be written already existed or the tuple to be deleted did not exist"
+                        f'"message":"cannot write a tuple which already exists: user: \'user:{ids.PERSONAL_SPACE_OWNER_UUID}\', relation: \'owner\', object: \'space:{SPACE_ID}\': tuple to be written already existed or the tuple to be deleted did not exist"}}\n'
+                        f" with error code write_failed_due_to_invalid_input error message: cannot write a tuple which already exists: user: 'user:{ids.PERSONAL_SPACE_OWNER_UUID}', relation: 'owner', object: 'space:{SPACE_ID}': tuple to be written already existed or the tuple to be deleted did not exist"
                     ),
                     error_code=audit.ErrorCode.WRITE_FAILED_DUE_TO_INVALID_INPUT,
                     kind=audit.Kind.VALIDATION,
@@ -470,7 +531,7 @@ class TestUpdateResource:
                     x_telegram_user_id=ids.INVALID_USER_ID,
                     request=resource.ResourceChangeMessage(
                         request_id=SPACE_CREATED_REQUEST_ID,
-                        resource=resource.ResourceRef(type=fields.ResourceType.SPACE, id=ids.PERSONAL_SPACE_ID),
+                        resource=resource.ResourceRef(type=fields.ResourceType.SPACE, id=SPACE_ID),
                         operation=fields.Operation.CREATE,
                         change_type=fields.ChangeType.RESOURCE_ADDED,
                         relations=resource.ResourceRelations(
@@ -487,7 +548,7 @@ class TestUpdateResource:
                         request_id=SPACE_CREATED_REQUEST_ID,
                         status=fields.Status.ERROR,
                         operation_result=fields.OperationResult.FAILED,
-                        resource=resource.ResourceRef(type=fields.ResourceType.SPACE, id=ids.PERSONAL_SPACE_ID),
+                        resource=resource.ResourceRef(type=fields.ResourceType.SPACE, id=SPACE_ID),
                         error=resource.ResourceChangeError(
                             code=audit.ErrorCode.USER_NOT_FOUND,
                             message=audit.Message.USER_NOT_FOUND,
@@ -514,6 +575,7 @@ class TestUpdateResource:
             ),
         ],
     )
+    @pytest.mark.usefixtures("isolated_resource")
     def test_create_space(     
         self,
         case: UpdateResourceCase,
@@ -727,6 +789,7 @@ class TestUpdateResource:
             ),
         ],
     )
+    @pytest.mark.usefixtures("isolated_resource")
     def test_create_reminder(     
         self,
         case: UpdateResourceCase,

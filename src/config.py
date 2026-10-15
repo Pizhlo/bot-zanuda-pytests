@@ -3,16 +3,13 @@
 """
 
 from pydantic import AnyUrl, Field
-from pydantic_settings import (
-    BaseSettings,
-    PydanticBaseSettingsSource,
-    SettingsConfigDict,
-    YamlConfigSettingsSource,
-)
+from pydantic_settings import BaseSettings
+
+from src.database_config import DatabaseConfig
+from src.database_config import PostgresConfig as PostgresConfig
 
 API_TIMEOUT = 30
 RABBITMQ_DEFAULT_PORT = 5672
-DEFAULT_POSTGRES_PORT = 5432
 DEFAULT_HEARTBEAT = 300
 DEFAULT_BLOCKED_CONNECTION_TIMEOUT = 300
 DEFAULT_CONNECTION_ATTEMPTS = 3
@@ -33,6 +30,18 @@ class AuthServiceConfig(BaseSettings):
     secret_key: str = Field()
 
 _DEFAULT_QUEUE_POLL_ATTEMPTS = 30
+
+class OpenFGAConfig(BaseSettings):
+    """Адрес тестового OpenFGA для адресной очистки связей, созданных pytest.
+
+    Имя хранилища должно совпадать с конфигом auth-service. Доступ используется
+    только тестовыми фикстурами: рабочую логику создания проверяет API сервиса.
+    """
+
+    base_url: AnyUrl = Field(default=AnyUrl("http://localhost:8081"))
+    store_name: str = Field(default="bot-zanuda")
+    timeout: int = Field(default=API_TIMEOUT)
+
 
 class RabbitMQConfig(BaseSettings):
     """Конфигурация для RabbitMQ"""
@@ -62,41 +71,15 @@ class VaultConfig(BaseSettings):
     auth_clients_path: str = Field(default="auth/clients")
 
 
-class PostgresConfig(BaseSettings):
-    """Конфигурация для PostgreSQL."""
-
-    host: str = Field(default="localhost")
-    port: int = Field(default=DEFAULT_POSTGRES_PORT)
-    user: str = Field(default="postgres")
-    password: str = Field(default="postgres")
-    dbname: str = Field(default="postgres")
-
-
-class Config(BaseSettings):
+class Config(DatabaseConfig):
     """Конфигурация для тестов"""
 
     # Базовые настройки
     webserver: WebServerConfig = Field(default_factory=WebServerConfig)
     rabbitmq: RabbitMQConfig = Field(default_factory=RabbitMQConfig)
     vault: VaultConfig = Field(default_factory=VaultConfig)
-    postgres: PostgresConfig = Field(default_factory=PostgresConfig)
     auth_service: AuthServiceConfig
-
-    model_config = SettingsConfigDict(
-        yaml_file="config.yaml", env_file_encoding="utf-8", extra="ignore"
-    )
-
-    @classmethod
-    def settings_customise_sources(
-        cls,
-        settings_cls: type[BaseSettings],
-        init_settings: PydanticBaseSettingsSource,
-        env_settings: PydanticBaseSettingsSource,
-        dotenv_settings: PydanticBaseSettingsSource,
-        file_secret_settings: PydanticBaseSettingsSource,
-    ) -> tuple[PydanticBaseSettingsSource, ...]:
-        return (YamlConfigSettingsSource(settings_cls),)
-
+    openfga: OpenFGAConfig = Field(default_factory=OpenFGAConfig)
 
 # Глобальный экземпляр конфигурации
 config = Config()  # type: ignore[call-arg]

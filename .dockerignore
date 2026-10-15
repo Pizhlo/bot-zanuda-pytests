@@ -3,3 +3,15 @@
 .ruff_cache/
 .venv
 __pycache__
+.git
+.env
+.env.*
+config.yaml
+testkit
+.logs
+.testkit-runs/
+
+# Локальные результаты проверок не нужны в образе.
+.coverage*
+htmlcov/
+coverage.xml

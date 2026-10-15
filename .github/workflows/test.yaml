@@ -199,7 +199,18 @@ jobs:
           echo "❌ No migrations directory found"
           exit 1
         fi
-      
+
+    - name: Create tests config from secret
+      run: |
+        cat <<'EOF' > config.yaml
+        ${{ secrets.PYTESTS_CONFIG }}
+        EOF
+        chmod 600 config.yaml
+
+    # Будет реализовано в задаче BZ-198
+    # - name: Run tests
+    #   run: make test
+
     - name: Stop containers
       if: always()
       run: make stop-containers

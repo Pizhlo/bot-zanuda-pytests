@@ -43,7 +43,7 @@ make docker-login     # login to Docker registry
 - End-to-end tests for entire project (web server, auth service, bot)
 - Currently testing: web server and auth service
 - Future: bot tests
-- Tests run in isolated Docker environment
+- Auth-service environments use the pinned testkit (container or Linux host modes)
 - Each test suite has its own database schema
 
 ## Test Patterns
@@ -55,7 +55,7 @@ make docker-login     # login to Docker registry
 ## Boundaries
 **MUST:**
 - Use fixtures for all setup (no hardcoded credentials)
-- Clean up test data after each test with transaction rollback or data-only cleanup.
+- Clean up each test's temporary data and isolated test messaging state with transaction rollback or targeted cleanup. Preserve the shared auth-service SQL baseline for repeated runs and IDE debugging; do not remove unrelated data.
 - Use type hints in all test code
 - Run `make lint` before committing
 - Keep tests under 50 lines (split into helpers if longer)
@@ -88,3 +88,40 @@ Before adding or changing a test scenario, fixture, API client, test environment
 2. If it is not described, propose adding it to `spec.md` before implementing the test.
 3. Keep test specifications, project constitution, and test code consistent.
 4. Not invent endpoint paths, authentication flows, status codes, token TTLs, or response fields without specification support.
+
+## Auth-service test environment lifecycle
+
+The environment and data-loading contract is documented in `specs/autotests/pipeline.md`.
+Use `integration-run` for the full isolated lifecycle and `integration-up` for preparation.
+Locally, use one environment with fixed ports; seed/test/logs/down do not require `RUN_ID`.
+CI retains an explicit `RUN_ID` and separate resources.
+SQL stays in `testdata/auth-service`; `tools/seed_auth.py` invokes the fixture's shared
+loader without pytest. All SQL runs atomically, without migrate or a version table.
+For IDE debugging, `PYTEST_CONFIG` selects a YAML file from pytests; the default is the
+consumer's `config.yaml`. Local runs build the current tests and SQL.
+The auth-service Make target disables automatic Allure reports; other suites retain
+their settings. Local failures preserve the environment and text logs; successful
+container runs remove them. In `AUTH_MODE=host`, auth-service's `containers-up/down`
+commands manage dependencies. Repeated host runs do not restart infrastructure;
+`SEED_DATA=false` skips seeding locally. CI always collects logs before attempting
+cleanup. Manual test runs require an explicit down command.
+Disposable test credentials from testkit are allowed; real secrets remain prohibited.
+Do not change the separate webserver workflow.
+
+For host/host test execution, do not require `integration-up` or invoke Docker: seed and pytest run
+on the host with the same `PYTEST_CONFIG` (default: pytests' `config.yaml`). Do not
+rewrite or commit the user's local YAML files. Diagnostic logs/down may access jobs
+owned by earlier container tests in the same session. Data is prepared by pytest or a
+standalone Make command. Compose overlays are only needed for container or mixed modes.
+
+
+## Fixture-based data preparation (current contract)
+
+For auth-service, a session-scoped autouse fixture executes all
+`testdata/auth-service/*.up.sql` files through psycopg in a single transaction.
+`ON CONFLICT` on fixed test keys allows repeated runs without affecting other rows.
+The baseline data remains available for IDE debugging; individual test fixtures clean
+up their temporary resources. `SEED_DATA=false` skips preparation locally; CI requires
+`true`. The standalone `make test-data-auth-service-up` command uses the same loader
+without running pytest. The migrate CLI and test-data version history are not used.
+Only auth-service runs schema migrations.
