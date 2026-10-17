@@ -15,29 +15,11 @@ fix:
 	uv run ruff check --select I --fix .
 	uv run ruff check --fix .
 
-# Поднять окружение корневого Compose; зависимости auth IDE поднимаются containers-up в auth-service.
-start-containers:
-	docker compose up -d
-
-# Запустить весь набор тестов; для авторизации отдельно используйте test-auth-service.
+# Поднять отдельные стенды и выполнить оба сервисных набора с общей сводкой.
 test:
-	uv run python -m pytest . 
+	@bash tools/run_all.sh "$(TESTKIT_DIR)"
 
-# Удалить контейнеры и сеть прежнего окружения корневого Compose.
-stop-containers:
-	docker compose down
-
-# Пересоздать прежнее окружение корневого Compose.
-restart-containers:
-	docker compose down
-	docker compose up -d
-
-# Удалить контейнеры прежнего Compose-окружения.
-clean-containers:
-	docker compose down
-	docker compose rm -f
-
-.PHONY: install lint fix start-containers test stop-containers restart-containers clean-containers
+.PHONY: install lint fix test
 
 # Запустить только tests/auth_service с выводом pytest без файлов отчётов.
 test-auth-service:
@@ -111,5 +93,15 @@ test-data-auth-service-up:
 
 # Проверить загрузчик данных без Docker/БД; покрытие нового модуля не ниже 80%.
 test-seed:
-	uv run --frozen coverage run --source=tests.fixtures.auth_data,tools.seed_auth,src.database_config -m unittest discover -s checks
+	uv run --frozen coverage run --source=tests.fixtures.auth_data,tools.seed_auth,src.database_config,tests.fixtures.webserver_data,tools.seed_webserver -m unittest discover -s checks
 	uv run --frozen coverage report --fail-under=80
+
+# Webserver использует отдельный набор SQL и не запускает тесты авторизации.
+.PHONY: test-webserver test-data-webserver-up
+test-webserver:
+	uv run --frozen python -m pytest -p no:cacheprovider -o 'addopts=--strict-markers --strict-config --verbose --tb=short' tests/webserver
+
+test-data-webserver-up:
+	uv run --frozen python -m tools.seed_webserver
+
+export INTEGRATION_SERVICE WEBSERVER_MODE WEBSERVER_IMAGE

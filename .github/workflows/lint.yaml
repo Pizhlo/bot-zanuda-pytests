@@ -21,3 +21,6 @@ jobs:
 
         - name: Проверить загрузчик тестовых данных
           run: make test-seed
+
+        - name: Проверить общий запуск и обработку ошибок
+          run: bash checks/test_run_all.sh

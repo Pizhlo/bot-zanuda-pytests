@@ -14,12 +14,10 @@
 make install          # install uv and sync dependencies
 make lint             # run flake8, ruff check, mypy
 make fix              # format code with ruff, fix imports
-make start-containers # start test environment (db, rabbitmq, vault)
-make test             # run all tests
+make test             # build current tests, run both isolated service environments, clean up
 make test-auth-service # run only auth service tests
-make stop-containers  # stop test environment
-make restart-containers # restart test environment
-make clean-containers # stop and remove containers
+make test-webserver   # run only webserver tests
+make integration-run # run one selected service through testkit
 make docker-build     # build Docker image
 make docker-push      # push Docker image to registry
 make docker-login     # login to Docker registry
@@ -37,7 +35,6 @@ make docker-login     # login to Docker registry
   - `tests/webserver/` — web server API tests
   - `tests/fixtures/` — pytest fixtures (JWT, db, rabbitmq, vault)
   - `tests/conftest.py` — global pytest configuration
-- `scripts/` — setup scripts (rabbitmq-setup.sh)
 
 ## Architecture Context
 - End-to-end tests for entire project (web server, auth service, bot)
@@ -106,7 +103,7 @@ commands manage dependencies. Repeated host runs do not restart infrastructure;
 `SEED_DATA=false` skips seeding locally. CI always collects logs before attempting
 cleanup. Manual test runs require an explicit down command.
 Disposable test credentials from testkit are allowed; real secrets remain prohibited.
-Do not change the separate webserver workflow.
+The webserver workflow is maintained separately under the BZ-206 contract in specs/autotests/pipeline.md. Preserve the auth-service workflow when changing it.
 
 For host/host test execution, do not require `integration-up` or invoke Docker: seed and pytest run
 on the host with the same `PYTEST_CONFIG` (default: pytests' `config.yaml`). Do not
@@ -125,3 +122,5 @@ up their temporary resources. `SEED_DATA=false` skips preparation locally; CI re
 `true`. The standalone `make test-data-auth-service-up` command uses the same loader
 without running pytest. The migrate CLI and test-data version history are not used.
 Only auth-service runs schema migrations.
+
+Webserver baseline data also remains available for repeated IDE runs. Its schema is prepared by testkit from pinned docker migrations, not by the fixture.

@@ -3,7 +3,14 @@
 Нужны Linux, Make, Python 3.10+ и PyYAML; для тестов на хосте — uv/Python 3.13,
 для контейнерных режимов — Docker с Compose. Инициализируйте testkit: `git submodule update --init --recursive`.
 
-## Полный запуск в контейнерах
+## Все сервисы в отдельных контейнерных стендах
+
+Из **pytests** выполните `make test`: один образ текущих тестов, затем auth-service
+и webserver последовательно. Оба набора выполняются даже при падении первого.
+Стенды изолированы от IDE и убираются при любом результате; логи и общая сводка
+остаются в `.logs/all-*/`. Детали — в разделе «Общий запуск всех сервисов».
+
+## Отдельный запуск auth-service в контейнерах
 
 Из **pytests**:
 
@@ -242,3 +249,73 @@ Actions Secrets и приватный testkit. Условие действует
 и удаляются явным integration-down. Эти команды не останавливают зависимости IDE.
 Ранние ошибки параметров/инициализации сохраняются в `.logs/<run-id>/initialization.log`;
 ошибка параллельной команды не изменяет журнал активного запуска.
+
+## Webserver: автономный набор и IDE
+
+`make test-webserver` выполняет только health/metrics/notes. Сессионная фикстура
+загружает `testdata/webserver/*.up.sql` атомарно; повторная загрузка сохраняет базовые
+и посторонние записи. `make test-data-webserver-up` использует тот же loader без
+pytest. Схему подготавливает testkit из закреплённых docker-миграций, включая UUID
+исправление 000020; seed её не создаёт. Notes fixture очищает свою очередь до запроса
+и после сценария, подтверждая сообщение только после assertions.
+
+```sh
+make integration-run INTEGRATION_SERVICE=webserver
+make integration-run INTEGRATION_SERVICE=webserver TEST_MODE=host
+# После containers-up и запуска webserver из его оригинального репозитория:
+make integration-run INTEGRATION_SERVICE=webserver WEBSERVER_MODE=host TEST_MODE=host PYTEST_CONFIG="$PWD/testkit/configs/pytests/webserver-host.yaml"
+make integration-run INTEGRATION_SERVICE=webserver WEBSERVER_MODE=host TEST_MODE=container PYTEST_CONFIG="$PWD/testkit/configs/pytests/webserver-host.yaml"
+```
+
+TESTKIT_DIR выбирает оригинальную рабочую копию harness. Пользовательский config.yaml
+не меняется; готовые примеры содержат обязательный auth_service.secret_key, но запуск
+auth-service не нужен. Host/host обходится без Docker со стороны тестового runner.
+SEED_DATA=false допустим только локально; standalone seed всегда загружает данные.
+После host-прогона зависимости IDE сохраняются, контейнерные jobs убирает integration-down;
+зависимости останавливаются containers-down в webserver. Container-run убирает свой
+стенд после успеха, ошибка сохраняет логи и ресурсы для диагностики.
+
+Workflow webserver.yaml заменяет отключённый test.yaml. Push/PR main/develop запускают
+его при связанных изменениях; ручной запуск принимает webserver_image override.
+Нужен WEBSERVER_IMAGE_REPOSITORY (полный repository без тега) либо ручной override,
+и CI_GITHUB_TOKEN/GH_TOKEN для private recursive checkout. Тесты/SQL берутся из
+текущего checkout, webserver — latest либо override. Fork PR пропускается до Secrets.
+Обычные конфиги из Secrets не требуются. Образы private registry требуют доступного
+runner registry authentication. Не публикуйте latest до проверки совместимого тега
+образа с новым testkit; реальные Actions runs проверяются отдельно от локальных.
+
+## Единый запуск окружения
+
+Testkit — единственный способ подготовки автоматизированного тестового окружения.
+Корневой docker-compose.yaml и команды start/stop/restart/clean-containers удалены.
+Используйте integration-up/run/logs/down с выбранным INTEGRATION_SERVICE;
+зависимости IDE запускаются containers-up в репозитории сервиса. Прямой pytest
+и отдельные test/seed команды сохранены. Общий make test описан в разделе общего запуска.
+Локальный .env и config.yaml не удаляются: .env также используется для IMAGE_NAME
+при сборке/публикации образа. Старые CI Secrets удаляются отдельно после миграции main.
+
+
+## Общий запуск всех сервисов
+
+`make test` собирает текущий checkout pytests один раз и последовательно запускает
+наборы auth-service и webserver в двух отдельных контейнерных стендах testkit.
+Каждому стенду назначается уникальный RUN_ID; порты хоста не публикуются.
+Используются встроенные конфиги и SQL образа, SEED_DATA=true. Локальные режимы,
+PYTEST_CONFIG, TESTDATA_PATH/TESTDATA_DATABASE_URL и пользовательский RUN_ID
+не переопределяют этот изолированный запуск. AUTH_IMAGE/WEBSERVER_IMAGE позволяют
+выбрать образы сервисов; по умолчанию используются опубликованные latest.
+Оба набора запускаются даже при ошибке первого. Общая ошибка сборки блокирует оба.
+Логи сохраняются в .logs/<общий-id>/; итог содержит статус каждого сервиса.
+Любая ошибка тестов, подготовки, логирования или уборки даёт ненулевой exit code.
+При любом исходе выполняется попытка удалить только ресурсы текущего запуска;
+при Ctrl+C/SIGTERM выполняется уборка активного стенда, второй набор не запускается.
+SIGKILL не позволяет гарантировать уборку. Команды test-auth-service/test-webserver
+остаются прямым pytest по готовому окружению; integration-run сохраняет свой контракт.
+
+```sh
+make test
+# Выбрать конкретный образ сервиса:
+make test WEBSERVER_IMAGE=pizhlo/bot-zanuda-webserver:latest
+```
+
+Проверка обработки ошибок общего запуска без Docker: `bash checks/test_run_all.sh`.

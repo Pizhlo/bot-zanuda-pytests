@@ -40,3 +40,59 @@ up their temporary resources. `SEED_DATA=false` skips preparation locally; CI re
 `true`. The standalone `make test-data-auth-service-up` command uses the same loader
 without running pytest. The migrate CLI and test-data version history are not used.
 Only auth-service runs schema migrations.
+
+
+## Webserver integration environment (BZ-206)
+
+The webserver profile SHALL be selected explicitly with INTEGRATION_SERVICE=webserver.
+The default profile and all existing auth-service commands, state and image inputs
+SHALL remain compatible. WEBSERVER_MODE and TEST_MODE SHALL support all four
+host/container combinations on Linux; CI SHALL use container/container.
+
+The webserver environment SHALL prepare PostgreSQL, Redis and RabbitMQ. It SHALL
+apply the explicit schema manifest from the pinned docker source before service
+readiness, seed and tests. Migration 000014 (Sequin deployment configuration) SHALL
+NOT run. Repeated preparation SHALL preserve data and reject a changed migration
+manifest on an existing environment. Auth-service continues to own its migrations.
+Webserver tests SHALL NOT require auth-service, db-worker or Elasticsearch processes.
+
+The stable integration-up/seed/rabbitmq-setup/test/logs/down/run interface SHALL
+support webserver. Up SHALL stop before seed/tests. Webserver containers-up/down
+SHALL manage IDE dependencies and schema preparation; the runner SHALL NOT manage
+the IDE process or its dependencies. Host/host seed and tests SHALL not invoke
+Docker or require up. Container jobs retained from earlier runs remain accessible
+through logs/down. User YAML files SHALL NOT be rewritten.
+
+Webserver SQL SHALL come from the same pytests version as the tests and load through
+one atomic, repeatable session fixture or standalone seed. The shared baseline SHALL
+remain for IDE use; unrelated data SHALL remain intact. SEED_DATA=false SHALL be
+local-only. Notes tests SHALL purge only their test queue before each request, wait
+for messages with a bounded timeout, validate request identity and clean up their
+own messaging state. The full health/metrics/notes suite SHALL run.
+
+Service CI SHALL test its current commit image with published tests (latest or an
+explicit tag). Pytests CI and local execution SHALL use current tests/data against
+published webserver latest or WEBSERVER_IMAGE. CI SHALL skip secret-dependent fork
+PR jobs before private checkout, isolate runs without host ports, show actual image
+IDs/digests and pytest results, then attempt cleanup even after preparation or log
+errors. Local container success SHALL clean up its resources; failures SHALL retain
+them and diagnostics. Host runs SHALL retain IDE infrastructure. Cleanup SHALL
+never adopt or remove another project's resources.
+
+
+## Общий запуск всех сервисов
+
+`make test` собирает текущий checkout pytests один раз и последовательно запускает
+наборы auth-service и webserver в двух отдельных контейнерных стендах testkit.
+Каждому стенду назначается уникальный RUN_ID; порты хоста не публикуются.
+Используются встроенные конфиги и SQL образа, SEED_DATA=true. Локальные режимы,
+PYTEST_CONFIG, TESTDATA_PATH/TESTDATA_DATABASE_URL и пользовательский RUN_ID
+не переопределяют этот изолированный запуск. AUTH_IMAGE/WEBSERVER_IMAGE позволяют
+выбрать образы сервисов; по умолчанию используются опубликованные latest.
+Оба набора запускаются даже при ошибке первого. Общая ошибка сборки блокирует оба.
+Логи сохраняются в .logs/<общий-id>/; итог содержит статус каждого сервиса.
+Любая ошибка тестов, подготовки, логирования или уборки даёт ненулевой exit code.
+При любом исходе выполняется попытка удалить только ресурсы текущего запуска;
+при Ctrl+C/SIGTERM выполняется уборка активного стенда, второй набор не запускается.
+SIGKILL не позволяет гарантировать уборку. Команды test-auth-service/test-webserver
+остаются прямым pytest по готовому окружению; integration-run сохраняет свой контракт.
