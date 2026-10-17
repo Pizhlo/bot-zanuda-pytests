@@ -269,17 +269,15 @@ class TestWebServerV0Notes:
         """
         response = webserver_v0_api_client.create_note(note)
         assert response.status_code == expected_status_code, response.text
-        match expected_status_code:
-            case httpx.codes.ACCEPTED:
-                RequestID.model_validate(response.json())
-                request_id = response.json()["request_id"]
+        if expected_status_code == httpx.codes.ACCEPTED:
+            RequestID.model_validate(response.json())
+            request_id = response.json()["request_id"]
 
-                if expected_message is not None:
-                    expected_message["request_id"] = request_id
+            if expected_message is not None:
+                expected_message["request_id"] = request_id
 
-                full_message = FullMessage.model_validate(expected_message)
-                with note_messages_from_rabbitmq as rabbitmq_message:
-                    message = rabbitmq_message
+            full_message = FullMessage.model_validate(expected_message)
+            with note_messages_from_rabbitmq as message:
                 if message:
                     real_message = FullMessage.model_validate_json(message)
 
@@ -299,8 +297,8 @@ class TestWebServerV0Notes:
 
                 else:
                     pytest.fail("Нет сообщений")
-            case _:
-                assert response.json() == expected_response
+        else:
+            assert response.json() == expected_response
 
 
 def check_time_difference(

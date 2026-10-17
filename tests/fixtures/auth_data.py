@@ -65,7 +65,11 @@ def prepare_auth_data() -> int:
     Ограничения ожидания блокировок/SQL не дают подготовке зависнуть бессрочно.
     История migrate не читается и не меняется, поэтому старые версии/dirty не мешают.
     """
-    sources = sql_sources()
+    return prepare_sql_data(sql_sources())
+
+
+def prepare_sql_data(sources: list[Path]) -> int:
+    """Применяет выбранный набор одной транзакцией с общей конфигурацией БД."""
     stage = "database connection"
     try:
         with connect_database() as connection:
