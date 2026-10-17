@@ -63,7 +63,8 @@ AUTH_MODE=host использует уже запущенный сервис с 
 
 Автоматически — на push в main/develop и PR в эти ветки, если изменены:
 
-- `tests/auth_service/**` (имя каталога с подчёркиванием), общие `tests/fixtures/**`,
+- `tests/auth_service/**`, `parameters/auth_service/**`, общий `parameters/__init__.py`,
+  общие `tests/fixtures/**`,
   conftest и `tests/__init__.py`;
 - `src/**`, `utils/**`, `testdata/auth-service/**` или загрузчик `tools/seed_auth.py`;
 - зависимости и настройки pytest/Python, Makefile, Dockerfile или .dockerignore;

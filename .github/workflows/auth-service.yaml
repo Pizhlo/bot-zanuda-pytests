@@ -7,6 +7,8 @@ on:
     # При новой общей зависимости добавьте её сюда. Документация и tests/webserver не входят.
     paths: &auth_service_paths
       - 'tests/auth_service/**'
+      - 'parameters/auth_service/**'
+      - 'parameters/__init__.py'
       - 'tests/fixtures/**'
       - 'tests/conftest.py'
       - 'tests/__init__.py'

@@ -225,7 +225,8 @@ seed всегда применяет данные. SQL пишутся без н�
 
 Автоматически — на push в main/develop и PR в эти ветки, если изменены:
 
-- `tests/auth_service/**` (имя каталога с подчёркиванием), общие `tests/fixtures/**`,
+- `tests/auth_service/**`, `parameters/auth_service/**`, общий `parameters/__init__.py`,
+  общие `tests/fixtures/**`,
   conftest и `tests/__init__.py`;
 - `src/**`, `utils/**`, `testdata/auth-service/**` или загрузчик `tools/seed_auth.py`;
 - зависимости и настройки pytest/Python, Makefile, Dockerfile или .dockerignore;
@@ -319,3 +320,19 @@ make test WEBSERVER_IMAGE=pizhlo/bot-zanuda-webserver:latest
 ```
 
 Проверка обработки ошибок общего запуска без Docker: `bash checks/test_run_all.sh`.
+
+## Параметры тестов
+
+Python-пакет `parameters/` содержит таблицы `pytest.param` и модели кейсов:
+- `auth_service/auth.py`, `auth_service/notes.py`, `auth_service/resource.py`;
+- `webserver/notes.py`.
+
+Тестовые модули импортируют таблицы, сохраняя имена аргументов, IDs, marks и indirect-фикстуры.
+Наборы сервисов собираются отдельно из-за совпадающих имён тестовых модулей:
+
+```bash
+uv run --frozen python -m pytest --collect-only tests/auth_service
+uv run --frozen python -m pytest --collect-only tests/webserver
+```
+
+Изменения только `parameters/webserver/**` не запускают CI auth-service.
