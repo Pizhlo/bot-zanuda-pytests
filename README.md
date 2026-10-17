@@ -226,7 +226,7 @@ seed всегда применяет данные. SQL пишутся без н�
 Автоматически — на push в main/develop и PR в эти ветки, если изменены:
 
 - `tests/auth_service/**`, `parameters/auth_service/**`, общий `parameters/__init__.py`,
-  общие `tests/fixtures/**`,
+  `assertions/auth_service.py`, общий `assertions/__init__.py`, общие `tests/fixtures/**`,
   conftest и `tests/__init__.py`;
 - `src/**`, `utils/**`, `testdata/auth-service/**` или загрузчик `tools/seed_auth.py`;
 - зависимости и настройки pytest/Python, Makefile, Dockerfile или .dockerignore;
@@ -336,3 +336,9 @@ uv run --frozen python -m pytest --collect-only tests/webserver
 ```
 
 Изменения только `parameters/webserver/**` не запускают CI auth-service.
+
+Повторяющиеся проверки вынесены в `assertions/auth_service.py` и `assertions/webserver.py`.
+Полные описания параметризованных сценариев находятся возле таблиц; тесты сохраняют запросы,
+основные ожидания и порядок чтения очередей. Перед обогащением данных тест создаёт локальную копию.
+
+Подготовка опционального токена (`optional_token`) находится в `tests/fixtures/auth_jwt.py`.

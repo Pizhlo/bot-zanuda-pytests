@@ -8,6 +8,8 @@ on:
     paths: &auth_service_paths
       - 'tests/auth_service/**'
       - 'parameters/auth_service/**'
+      - 'assertions/auth_service.py'
+      - 'assertions/__init__.py'
       - 'parameters/__init__.py'
       - 'tests/fixtures/**'
       - 'tests/conftest.py'

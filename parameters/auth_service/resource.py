@@ -338,6 +338,12 @@ RESOURCE_CREATE_NOTE_CASES = (
         id="user not found",
     ),
 )
+"""Тест на создание заметки.
+
+- Успешное создание заметки: 200 OK
+- Заметка уже существует: 409 Conflict
+- Пользователя не существует (хедер x-telegram-user-id): 404 Not Found
+"""
 
 
 CREATE_SPACE_CASES = (
@@ -479,6 +485,12 @@ CREATE_SPACE_CASES = (
         id="user not found",
     ),
 )
+"""Тест на создание пространства.
+
+- Успешное создание пространства: 200 OK
+- Пространство уже существует: 409 Conflict
+- Пользователя не существует (хедер x-telegram-user-id): 404 Not Found
+"""
 
 
 CREATE_REMINDER_CASES = (
@@ -655,6 +667,12 @@ CREATE_REMINDER_CASES = (
         id="user not found",
     ),
 )
+"""Тест на создание напоминания.
+
+- Успешное создание напоминания: 200 OK
+- Напоминание уже существует: 409 Conflict
+- Пользователя не существует (хедер x-telegram-user-id): 404 Not Found
+"""
 
 
 UPDATE_RESOURCE_INVALID_TOKEN_CASES = (
@@ -1026,6 +1044,25 @@ UPDATE_RESOURCE_INVALID_TOKEN_CASES = (
         id="invalid client id with telegram user",
     ),
 )
+"""Тест на обновление ресурса.
+
+- Протухший токен - 401
+- Токена нет - 401
+- В токене нет sub - 401
+- В токене нет iss - 401
+- В токене нет exp - 401
+- В токене нет scope - 401
+- В токене нет aud - 401
+- В токене нет iat - 401
+- Нет хедера x-telegram-user-id - 401
+- Неправильный sub - 401
+- Неправильный iss - 401
+- Неправильный aud - 401
+- Неправильный iat - 401
+- Неправильный scope - 401
+- Неправильный client_id - 401
+- Неправильный x_telegram_user_id - 401
+"""
 
 
 UPDATE_RESOURCE_VALIDATION_ERRORS_CASES = (
@@ -1280,3 +1317,16 @@ UPDATE_RESOURCE_VALIDATION_ERRORS_CASES = (
         id="space: event type mismatch",
     ),
 )
+"""Тест на валидацию запросов update_resource при создании ресурсов.
+
+
+Заметки и напоминания:
+- обязательны relations.owner (type=user) и relations.parent (type=space)
+- change_type только из NOTE_AND_REMINDER_CHANGE_TYPES
+- event_type должен соответствовать операции (для create — *_CREATED)
+
+Пространства:
+- обязателен owner, parent запрещён
+- change_type только из SPACE_CHANGE_TYPES
+- event_type должен соответствовать операции
+"""

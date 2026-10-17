@@ -5,7 +5,7 @@ import hashlib
 import hmac
 import json
 import time
-from typing import Any
+from typing import Any, Callable
 from dataclasses import dataclass
 
 import jwt
@@ -116,3 +116,13 @@ def check_token_fields(token: str, expected_fields: dict[str, Any]) -> None:
 
     if _iat_field in payload:
        assert_iat_recent(payload, tolerance_sec=_DEFAULT_IAT_TOLERANCE_SEC)
+
+
+def optional_token(
+    factory: Callable[..., str],
+    token_fields: TokenFields | None,
+) -> str | None:
+    """Сохраняет отсутствие токена, если сценарий не задаёт его поля."""
+    if token_fields is None:
+        return None
+    return factory(token_fields=token_fields)
