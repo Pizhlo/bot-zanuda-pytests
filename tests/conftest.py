@@ -1,3 +1,7 @@
+import pytest
+
+pytest.register_assert_rewrite("assertions.webserver")
+
 pytest_plugins = [
     "tests.fixtures.webserver",
     "tests.fixtures.rabbitmq",

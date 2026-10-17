@@ -1,28 +1,30 @@
+import logging
+import uuid
+from dataclasses import asdict, replace
+from typing import Callable, ContextManager, Generator, Optional
+
+import httpx
+import pytest
+
+import src.models.resource as resource
 from parameters.auth_service.resource import (  # noqa: WPS235 — типы и таблицы одного набора
     RESOURCE_CREATE_NOTE_CASES,
     CREATE_REMINDER_CASES,
     CREATE_SPACE_CASES,
     DEFAULT_UPDATE_RESOURCE_REQUEST,
-    InvalidUpdateResourceTokenCase,
     UPDATE_RESOURCE_INVALID_TOKEN_CASES,
     UPDATE_RESOURCE_VALIDATION_ERRORS_CASES,
+    InvalidUpdateResourceTokenCase,
     UpdateResourceCase,
     ValidationErrorCase,
 )
-
-import logging
-from dataclasses import asdict, replace
-from collections.abc import Callable, Generator
-from typing import ContextManager, Optional
-import httpx, pytest, uuid
-
 from src.api_clients.auth_service import AuthServiceV0APIClient
-from src.common import audit, errors, fields, ids
-from src.common.server_error_logging import log_internal_server_error
-import src.models.resource as resource
-from tests.fixtures.openfga import remove_resource_relations
+from src.common import audit, errors, fields, ids, server_error_logging
+from tests.fixtures import auth_jwt, openfga as openfga_helpers
+from assertions.auth_service import assert_audit_payload
 
 logger = logging.getLogger(__name__)
+
 
 @pytest.fixture()
 def isolated_resource(
@@ -51,13 +53,16 @@ def isolated_resource(
         if case.expected_status_code == httpx.codes.CONFLICT:
             preparation = replace(case.request, request_id=str(uuid.uuid4()))
             response = client.update_resource(
-                asdict(preparation), token=login, x_telegram_user_id=case.x_telegram_user_id,
+                asdict(preparation),
+                token=login,
+                x_telegram_user_id=case.x_telegram_user_id,
             )
             assert response.status_code == httpx.codes.OK, response.text
         yield
     finally:
-        remove_resource_relations(
-            openfga, resource.format_ref(case.request.resource.type, case.request.resource.id),
+        openfga_helpers.remove_resource_relations(
+            openfga,
+            resource.format_ref(case.request.resource.type, case.request.resource.id),
         )
 
 
@@ -69,7 +74,7 @@ class TestUpdateResource:
     """
 
     @pytest.mark.parametrize(
-        ("case", "expected_audit_message"), # noqa: WPS226
+        ("case", "expected_audit_message"),  # noqa: WPS226
         RESOURCE_CREATE_NOTE_CASES,
     )
     @pytest.mark.usefixtures("isolated_resource")
@@ -81,16 +86,15 @@ class TestUpdateResource:
         auth_service_v0_api_client: AuthServiceV0APIClient,
         auth_service_error_messages_from_rabbitmq: ContextManager[Optional[bytes]],
     ) -> None:
-        """
-        Тест на создание заметки.
-        - Успешное создание заметки: 200 OK
-        - Заметка уже существует: 409 Conflict
-        - Пользователя не существует (хедер x-telegram-user-id): 404 Not Found
-        """
+        """Тест на создание заметки."""
         token = login
 
-        response = auth_service_v0_api_client.update_resource(asdict(case.request), token=token, x_telegram_user_id=case.x_telegram_user_id)
-        log_internal_server_error(response, logger, fields.ERROR_FIELD)
+        response = auth_service_v0_api_client.update_resource(
+            asdict(case.request),
+            token=token,
+            x_telegram_user_id=case.x_telegram_user_id,
+        )
+        server_error_logging.log_internal_server_error(response, logger, fields.ERROR_FIELD)
 
         with auth_service_error_messages_from_rabbitmq as rabbitmq_message:
             message = rabbitmq_message
@@ -103,12 +107,9 @@ class TestUpdateResource:
         if case.expected_response is not None:
             resource.assert_api_response(response.json(), case.expected_response)
 
-        if message and expected_audit_message is not None: # noqa: WPS204
-            real_message = audit.AuditMessage.model_validate_json(message)
-            audit.assert_audit_message(expected_audit_message, real_message)
-            audit.assert_audit_message_context(expected_audit_message, real_message)
-        elif expected_audit_message is not None:
-            pytest.fail(errors.NO_AUDIT_MESSAGES_ERROR)
+        assert_audit_payload(
+            message, expected_audit_message, errors.NO_AUDIT_MESSAGES_ERROR
+        )
 
     @pytest.mark.parametrize(
         ("case", "expected_audit_message"),
@@ -121,17 +122,17 @@ class TestUpdateResource:
         login: str,
         expected_audit_message: audit.AuditMessage | None,
         auth_service_v0_api_client: AuthServiceV0APIClient,
-        auth_service_error_messages_from_rabbitmq: ContextManager[Optional[bytes]],) -> None:
-        """
-        Тест на создание пространства.
-        - Успешное создание пространства: 200 OK
-        - Пространство уже существует: 409 Conflict
-        - Пользователя не существует (хедер x-telegram-user-id): 404 Not Found
-        """
+        auth_service_error_messages_from_rabbitmq: ContextManager[Optional[bytes]],
+    ) -> None:
+        """Тест на создание пространства."""
         token = login
 
-        response = auth_service_v0_api_client.update_resource(asdict(case.request), token=token, x_telegram_user_id=case.x_telegram_user_id)
-        log_internal_server_error(response, logger, fields.ERROR_FIELD)
+        response = auth_service_v0_api_client.update_resource(
+            asdict(case.request),
+            token=token,
+            x_telegram_user_id=case.x_telegram_user_id,
+        )
+        server_error_logging.log_internal_server_error(response, logger, fields.ERROR_FIELD)
 
         with auth_service_error_messages_from_rabbitmq as rabbitmq_message:
             message = rabbitmq_message
@@ -144,12 +145,9 @@ class TestUpdateResource:
         if case.expected_response is not None:
             resource.assert_api_response(response.json(), case.expected_response)
 
-        if message and expected_audit_message is not None:
-            real_message = audit.AuditMessage.model_validate_json(message)
-            audit.assert_audit_message(expected_audit_message, real_message)
-            audit.assert_audit_message_context(expected_audit_message, real_message)
-        elif expected_audit_message is not None:
-            pytest.fail(errors.NO_AUDIT_MESSAGES_ERROR)
+        assert_audit_payload(
+            message, expected_audit_message, errors.NO_AUDIT_MESSAGES_ERROR
+        )
 
     @pytest.mark.parametrize(
         ("case", "expected_audit_message"),
@@ -162,17 +160,17 @@ class TestUpdateResource:
         login: str,
         expected_audit_message: audit.AuditMessage | None,
         auth_service_v0_api_client: AuthServiceV0APIClient,
-        auth_service_error_messages_from_rabbitmq: ContextManager[Optional[bytes]],) -> None:
-        """
-        Тест на создание напоминания.
-        - Успешное создание напоминания: 200 OK
-        - Напоминание уже существует: 409 Conflict
-        - Пользователя не существует (хедер x-telegram-user-id): 404 Not Found
-        """
+        auth_service_error_messages_from_rabbitmq: ContextManager[Optional[bytes]],
+    ) -> None:
+        """Тест на создание напоминания."""
         token = login
 
-        response = auth_service_v0_api_client.update_resource(asdict(case.request), token=token, x_telegram_user_id=case.x_telegram_user_id)
-        log_internal_server_error(response, logger, fields.ERROR_FIELD)
+        response = auth_service_v0_api_client.update_resource(
+            asdict(case.request),
+            token=token,
+            x_telegram_user_id=case.x_telegram_user_id,
+        )
+        server_error_logging.log_internal_server_error(response, logger, fields.ERROR_FIELD)
 
         with auth_service_error_messages_from_rabbitmq as rabbitmq_message:
             message = rabbitmq_message
@@ -185,12 +183,9 @@ class TestUpdateResource:
         if case.expected_response is not None:
             resource.assert_api_response(response.json(), case.expected_response)
 
-        if message and expected_audit_message is not None:
-            real_message = audit.AuditMessage.model_validate_json(message)
-            audit.assert_audit_message(expected_audit_message, real_message)
-            audit.assert_audit_message_context(expected_audit_message, real_message)
-        elif expected_audit_message is not None:
-            pytest.fail(errors.NO_AUDIT_MESSAGES_ERROR)
+        assert_audit_payload(
+            message, expected_audit_message, errors.NO_AUDIT_MESSAGES_ERROR
+        )
 
     @pytest.mark.parametrize(
         ("invalid_case", "expected_audit_message"),
@@ -204,38 +199,15 @@ class TestUpdateResource:
         jwt_token_factory: Callable[..., str],
         auth_service_error_messages_from_rabbitmq: ContextManager[Optional[bytes]],
     ) -> None:
-        """
-        Тест на обновление ресурса.
-        - Протухший токен - 401
-        - Токена нет - 401
-        - В токене нет sub - 401
-        - В токене нет iss - 401
-        - В токене нет exp - 401
-        - В токене нет scope - 401
-        - В токене нет aud - 401
-        - В токене нет iat - 401
-        - Нет хедера x-telegram-user-id - 401
-        - Неправильный sub - 401
-        - Неправильный iss - 401
-        - Неправильный aud - 401
-        - Неправильный iat - 401
-        - Неправильный scope - 401
-        - Неправильный client_id - 401
-        - Неправильный x_telegram_user_id - 401
-        """
-        token: str | None = None
-
-        if invalid_case.token_fields is not None:
-            token = jwt_token_factory(
-                token_fields=invalid_case.token_fields,
-            )
+        """Тест на обновление ресурса."""
+        token = auth_jwt.optional_token(jwt_token_factory, invalid_case.token_fields)
 
         response = auth_service_v0_api_client.update_resource(
             asdict(DEFAULT_UPDATE_RESOURCE_REQUEST),
             token=token,
             x_telegram_user_id=invalid_case.telegram_user_id,
         )
-        log_internal_server_error(response, logger, fields.ERROR_FIELD)
+        server_error_logging.log_internal_server_error(response, logger, fields.ERROR_FIELD)
 
         with auth_service_error_messages_from_rabbitmq as rabbitmq_message:
             message = rabbitmq_message
@@ -246,14 +218,13 @@ class TestUpdateResource:
             assert invalid_case.expected_message == response.json()[fields.ERROR_FIELD]
 
         if invalid_case.expected_response is not None:
-            resource.assert_api_response(response.json(), invalid_case.expected_response)
+            resource.assert_api_response(
+                response.json(), invalid_case.expected_response
+            )
 
-        if message and expected_audit_message is not None:
-            real_message = audit.AuditMessage.model_validate_json(message)
-            audit.assert_audit_message(expected_audit_message, real_message)
-            audit.assert_audit_message_context(expected_audit_message, real_message)
-        elif expected_audit_message is not None:
-            pytest.fail(errors.NO_AUDIT_MESSAGES_ERROR)
+        assert_audit_payload(
+            message, expected_audit_message, errors.NO_AUDIT_MESSAGES_ERROR
+        )
 
     @pytest.mark.parametrize(
         "case",
@@ -266,25 +237,13 @@ class TestUpdateResource:
         auth_service_v0_api_client: AuthServiceV0APIClient,
         auth_service_error_messages_from_rabbitmq: ContextManager[Optional[bytes]],
     ) -> None:
-        """
-        Тест на валидацию запросов update_resource при создании ресурсов.
-
-        Заметки и напоминания:
-        - обязательны relations.owner (type=user) и relations.parent (type=space)
-        - change_type только из NOTE_AND_REMINDER_CHANGE_TYPES
-        - event_type должен соответствовать операции (для create — *_CREATED)
-
-        Пространства:
-        - обязателен owner, parent запрещён
-        - change_type только из SPACE_CHANGE_TYPES
-        - event_type должен соответствовать операции
-        """
+        """Тест на валидацию запросов update_resource при создании ресурсов."""
         response = auth_service_v0_api_client.update_resource(
             asdict(case.request),
             token=login,
             x_telegram_user_id=ids.ADMIN_USER_ID,
         )
-        log_internal_server_error(response, logger, fields.ERROR_FIELD)
+        server_error_logging.log_internal_server_error(response, logger, fields.ERROR_FIELD)
 
         # validateRequest в fga.UpdateResource: level=debug,
         # error_code=WRITE_FAILED_DUE_TO_INVALID_INPUT, cause=Err.Error()
@@ -306,12 +265,9 @@ class TestUpdateResource:
         with auth_service_error_messages_from_rabbitmq as rabbitmq_message:
             message = rabbitmq_message
 
-        if message:
-            real_message = audit.AuditMessage.model_validate_json(message)
-            audit.assert_audit_message(validation_audit_message, real_message)
-            audit.assert_audit_message_context(validation_audit_message, real_message)
-        else:
-            pytest.fail(errors.NO_AUDIT_MESSAGES_ERROR)
+        assert_audit_payload(
+            message, validation_audit_message, errors.NO_AUDIT_MESSAGES_ERROR
+        )
 
         assert response.status_code == case.expected_status_code, response.text
         resource.assert_api_response(response.json(), case.expected_response)

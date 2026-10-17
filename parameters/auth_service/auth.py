@@ -57,6 +57,13 @@ LOGIN_SUCCESS_CASES = (
         id="valid with many scopes and empty scope",
     ),
 )
+"""Тест на успешные запросы на авторизацию.
+
+Проверяет ответ, payload токена и scope.
+- валидный запрос - 200
+- валидный запрос с множественными scope - 200
+- валидный запрос с пустым scope (но много scope в БД) - 200
+"""
 
 
 LOGIN_INVALID_REQUEST_CASES = (
@@ -245,6 +252,15 @@ LOGIN_INVALID_REQUEST_CASES = (
         id="no vault client secret",
     ),
 )
+"""Тест на невалидные запросы на авторизацию.
+
+- невалидный scope - 403
+- невалидный grant type - 400
+- невалидный client_id - 401
+- неактивный клиент - 401
+- неверный client_secret - 401
+- секрет клиента отсутствует в vault - 401
+"""
 
 
 LOGIN_INVALID_BODY_CASES = (
@@ -315,3 +331,9 @@ LOGIN_INVALID_BODY_CASES = (
             id="invalid client",
         )
     )
+"""Тест на невалидные запросы на авторизацию.
+
+- пустое тело - 400
+- неправильный json - 400
+- отсутствует client_id - 401
+"""

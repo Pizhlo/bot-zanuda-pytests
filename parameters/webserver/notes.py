@@ -222,3 +222,21 @@ NOTE_CREATE_CASES = (
         id="very long text with different characters",
     ),
 )
+"""Тест создания заметки с разными сценариями.
+
+- Успешное создание заметки: 202 Accepted
+- Очень длинный текст: 202 Accepted
+- Пространство не принадлежит пользователю: 400 Bad Request
+- Пространство не существует: 400 Bad Request
+- Не указан тип заметки: 400 Bad Request
+- Не указан user_id: 400 Bad Request
+- Неизвестный пользователь: 400 Bad Request
+- Неизвестное пространство: 400 Bad Request
+- Не указано пространство: 400 Bad Request
+- Не указан текст: 400 Bad Request
+- Неправильный UUID: 400 Bad Request
+- Неправильный тип user_id: 400 Bad Request
+- Неправильный тип text: 400 Bad Request
+- Неправильный тип type: 400 Bad Request
+- Пустой JSON: 400 Bad Request
+"""
