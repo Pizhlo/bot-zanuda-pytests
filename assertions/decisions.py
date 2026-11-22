@@ -57,6 +57,18 @@ def assert_decision_meta(meta: dict[str, Any], body: dict[str, Any]) -> None:
     assert meta["latency_ms"] >= 0
 
 
+def assert_invalid_response(
+    response: httpx.Response, request_id: str, message: str
+) -> None:
+    """Сверяет весь публичный ответ об ошибке валидации с UUID отправленного запроса."""
+    assert response.status_code == httpx.codes.BAD_REQUEST, response.text
+    assert response.json() == {
+        "error_code": "invalid_request",
+        fields.MESSAGE_FIELD: message,
+        fields.REQUEST_ID_FIELD: request_id,
+    }
+
+
 def assert_failed_decision(
     message: bytes | None,
     response: httpx.Response,

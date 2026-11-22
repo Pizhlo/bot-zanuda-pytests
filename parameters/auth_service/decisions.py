@@ -4,8 +4,12 @@ import pytest
 
 from src.models.decision import DecisionReasonCode, Role
 
+MEMBER = "member"
 READ = "read"
 STOP = "stop"
+ADD = "add"
+EDIT = "edit"
+REMOVE = "remove"
 
 
 REPEATED_READ_CASES = (
