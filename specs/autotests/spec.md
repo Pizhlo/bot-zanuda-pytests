@@ -12,6 +12,8 @@ Currently testing web server and auth service APIs.
 
 ## Test Categories
 
+Service repositories own unit and component integration tests for their adapters, storage formats, CLI tools, migrations and embedded policies. Pytests exercises the public interfaces of the standard service image, including failures of real dependencies. Tests may inspect storage and logs to confirm an externally initiated operation and its side effects. Testkit owns the environment lifecycle and isolation.
+
 ### API Tests
 - HTTP requests to services
 - Validate status codes, response bodies, headers
