@@ -77,6 +77,13 @@ def spaces(  # noqa: WPS210 — перечисление связей тесто
         yield graph
 
 
+def new_request_header_id(request_ids: set[UUID]) -> str:
+    """Выделяет X-Request-ID и заранее регистрирует его для очистки истории после теста."""
+    header_id = uuid4()
+    request_ids.add(header_id)
+    return str(header_id)
+
+
 @dataclass
 class DecisionClient:
     """Отправляет запрос с доверенным заголовком и регистрирует UUID до HTTP-вызова."""
@@ -94,20 +101,26 @@ class DecisionClient:
 
 
 @pytest.fixture()
+def decision_request_ids(postgres_client: PostgresClient) -> Iterator[set[UUID]]:
+    """Регистрирует UUID до HTTP-вызова и удаляет возможные записи после сценария."""
+    request_ids: set[UUID] = set()
+    try:
+        yield request_ids
+    finally:
+        postgres_client.execute(
+            "DELETE FROM auth.decisions WHERE request_id = ANY(%s)",
+            (list(request_ids),),
+        )
+
+
+@pytest.fixture()
 def decisions(
     auth_service_v0_api_client: AuthServiceV0APIClient,
     login: str,
-    postgres_client: PostgresClient,
-) -> Iterator[DecisionClient]:
+    decision_request_ids: set[UUID],
+) -> DecisionClient:
     """Предоставляет клиент с токеном тестового бота и учётом request_id текущего теста.
     Идентификатор регистрируется до отправки, чтобы возможную запись можно было удалить
     и после сетевой ошибки или неуспешной проверки ответа.
     """
-    client = DecisionClient(auth_service_v0_api_client, login, set())
-    try:
-        yield client
-    finally:
-        postgres_client.execute(
-            "DELETE FROM auth.decisions WHERE request_id = ANY(%s)",
-            (list(client.request_ids),),
-        )
+    return DecisionClient(auth_service_v0_api_client, login, decision_request_ids)
