@@ -1,3 +1,5 @@
+from src.models.space import SpaceType
+from parameters.auth_service import request_audit
 import time
 from dataclasses import dataclass
 import httpx, pytest, uuid
@@ -88,7 +90,7 @@ def _make_create_request( # noqa: WPS211
 
 @dataclass(frozen=True)
 class UpdateResourceCase:
-    """Сценарий для вызова update_resource."""
+    """Сценарий для вызова update_resource. При x_telegram_user_id=None фикстура выбирает корректный незарегистрированный ID."""
 
     request: resource.ResourceChangeMessage
     expected_status_code: int
@@ -108,7 +110,7 @@ class InvalidUpdateResourceTokenCase:
     expected_response: resource.ResourceChangeResponse | None
 
 
-EMPTY_RESOURCE_REF = resource.ResourceRef(
+EMPTY_RESOURCE_REF = resource.ResourceWithAttributes(
     type="",
     id="00000000-0000-0000-0000-000000000000",
 )
@@ -218,7 +220,7 @@ RESOURCE_CREATE_NOTE_CASES = (
                 idempotency_key="",
                 status=fields.Status.COMPLETED,
                 operation_result=fields.OperationResult.APPLIED,
-                resource=resource.ResourceRef(type=fields.ResourceType.NOTE, id=NOTE_ID),
+                resource=resource.ResourceWithAttributes(type=fields.ResourceType.NOTE, id=NOTE_ID),
                 written_tuples=(
                     resource.AuthTuple(
                         subject=NOTE_OWNER_SUBJECT,
@@ -277,6 +279,7 @@ RESOURCE_CREATE_NOTE_CASES = (
         audit.AuditMessage(
             service_name=audit.AUTH_SERVICE_NAME,
             level=audit.Level.ERROR,
+            message="OpenFGA rejected the tuple changes",
             cause=(
                 f'POST validation error for Write POST with body {{"code":"write_failed_due_to_invalid_input",'
                 f'"message":"cannot write a tuple which already exists: user: \'user:{NOTE_OWNER_ID}\', relation: \'owner\', object: \'note:{NOTE_ID}\': tuple to be written already existed or the tuple to be deleted did not exist"}}\n'
@@ -286,13 +289,13 @@ RESOURCE_CREATE_NOTE_CASES = (
             kind=audit.Kind.VALIDATION,
             operation=audit.Operation.FGA_UPDATE_RESOURCE,
             status=audit.Status.FAILED,
-            context={fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT, fields.USER_ID_FIELD: ids.ADMIN_USER_ID},
+            context={fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT, fields.USER_ID_FIELD: ids.ADMIN_USER_ID_UUID},
         ),
         id="note already exists",
     ),
      pytest.param(
         UpdateResourceCase(
-            x_telegram_user_id=ids.INVALID_USER_ID,
+            x_telegram_user_id=None,
             request=resource.ResourceChangeMessage(
                 request_id=NOTE_CREATED_REQUEST_ID,
                 resource=resource.ResourceRef(type=fields.ResourceType.NOTE, id=NOTE_ID),
@@ -329,11 +332,12 @@ RESOURCE_CREATE_NOTE_CASES = (
             service_name=audit.AUTH_SERVICE_NAME,
             level=audit.Level.ERROR,
             cause=audit.Message.NOT_FOUND,
+            message="User is not registered",
             error_code=audit.ErrorCode.USER_NOT_FOUND,
             kind=audit.Kind.VALIDATION,
             operation=audit.Operation.FGA_UPDATE_RESOURCE,
             status=audit.Status.FAILED,
-            context={fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT, fields.USER_ID_FIELD: ids.INVALID_USER_ID},
+            context={fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT, audit.STAGE_FIELD: "identify_actor"},
         ),
         id="user not found",
     ),
@@ -349,10 +353,14 @@ RESOURCE_CREATE_NOTE_CASES = (
 CREATE_SPACE_CASES = (
     pytest.param(
         UpdateResourceCase(
-            x_telegram_user_id=ids.ADMIN_USER_ID,
+            x_telegram_user_id=ids.PERSONAL_SPACE_OWNER_USER_ID,
             request=resource.ResourceChangeMessage(
                 request_id=SPACE_CREATED_REQUEST_ID,
-                resource=resource.ResourceRef(type=fields.ResourceType.SPACE, id=SPACE_ID),
+                resource=resource.ResourceWithAttributes(
+                    type=fields.ResourceType.SPACE,
+                    id=SPACE_ID,
+                    attributes={fields.SPACE_TYPE_FIELD: SpaceType.SHARED},
+                ),
                 operation=fields.Operation.CREATE,
                 change_type=fields.ChangeType.RESOURCE_ADDED,
                 relations=resource.ResourceRelations(
@@ -370,13 +378,19 @@ CREATE_SPACE_CASES = (
                 idempotency_key="",
                 status=fields.Status.COMPLETED,
                 operation_result=fields.OperationResult.APPLIED,
-                resource=resource.ResourceRef(type=fields.ResourceType.SPACE, id=SPACE_ID),
+                resource=resource.ResourceWithAttributes(
+                    type=fields.ResourceType.SPACE,
+                    id=SPACE_ID,
+                    attributes={fields.SPACE_TYPE_FIELD: SpaceType.SHARED},
+                ),
                 written_tuples=(
                     resource.AuthTuple(
                         subject=SPACE_OWNER_SUBJECT,
                         relation=fields.Relation.OWNER,
                         resource=SPACE_RESOURCE,
                     ),
+                    resource.AuthTuple("user:*", "created", SPACE_RESOURCE),
+                    resource.AuthTuple("user:*", SpaceType.SHARED, SPACE_RESOURCE),
                 ),
                 deleted_tuples=(),
                 meta=resource.ResourceChangeMeta(),
@@ -388,10 +402,14 @@ CREATE_SPACE_CASES = (
     ),
      pytest.param(
         UpdateResourceCase(
-            x_telegram_user_id=ids.ADMIN_USER_ID,
+            x_telegram_user_id=ids.PERSONAL_SPACE_OWNER_USER_ID,
             request=resource.ResourceChangeMessage(
                 request_id=SPACE_CREATED_REQUEST_ID,
-                resource=resource.ResourceRef(type=fields.ResourceType.SPACE, id=SPACE_ID),
+                resource=resource.ResourceWithAttributes(
+                    type=fields.ResourceType.SPACE,
+                    id=SPACE_ID,
+                    attributes={fields.SPACE_TYPE_FIELD: SpaceType.SHARED},
+                ),
                 operation=fields.Operation.CREATE,
                 change_type=fields.ChangeType.RESOURCE_ADDED,
                 relations=resource.ResourceRelations(
@@ -411,10 +429,10 @@ CREATE_SPACE_CASES = (
                 resource=resource.ResourceRef(type=fields.ResourceType.SPACE, id=SPACE_ID),
                 error=resource.ResourceChangeError(
                     code=audit.ErrorCode.RESOURCE_ALREADY_EXISTS_OR_NOT_FOUND,
-                    message="new resource already exists or deleted resource not found",
+                    message="guard space invariants: validate stored space operation: new resource already exists or deleted resource not found",
                     details=resource.ResourceChangeErrorDetails(
                         operation=fields.Operation.CREATE,
-                        detailed_error=EMPTY_DETAILED_ERROR,
+                        detailed_error=None,
                     ),
                 ),
                 meta=resource.ResourceChangeMeta(),
@@ -423,26 +441,27 @@ CREATE_SPACE_CASES = (
         ),
         audit.AuditMessage(
             service_name=audit.AUTH_SERVICE_NAME,
-            level=audit.Level.ERROR,
-            cause=(
-                f'POST validation error for Write POST with body {{"code":"write_failed_due_to_invalid_input",'
-                f'"message":"cannot write a tuple which already exists: user: \'user:{ids.PERSONAL_SPACE_OWNER_UUID}\', relation: \'owner\', object: \'space:{SPACE_ID}\': tuple to be written already existed or the tuple to be deleted did not exist"}}\n'
-                f" with error code write_failed_due_to_invalid_input error message: cannot write a tuple which already exists: user: 'user:{ids.PERSONAL_SPACE_OWNER_UUID}', relation: 'owner', object: 'space:{SPACE_ID}': tuple to be written already existed or the tuple to be deleted did not exist"
-            ),
-            error_code=audit.ErrorCode.WRITE_FAILED_DUE_TO_INVALID_INPUT,
+            level=audit.Level.DEBUG,
+            message="Space privacy constraint rejected the update",
+            cause="validate stored space operation: new resource already exists or deleted resource not found",
+            error_code="VALIDATION_FAILED",
             kind=audit.Kind.VALIDATION,
             operation=audit.Operation.FGA_UPDATE_RESOURCE,
             status=audit.Status.FAILED,
-            context={fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT, fields.USER_ID_FIELD: ids.ADMIN_USER_ID},
+            context={fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT, fields.USER_ID_FIELD: ids.PERSONAL_SPACE_OWNER_UUID},
         ),
         id="space already exists",
     ),
      pytest.param(
         UpdateResourceCase(
-            x_telegram_user_id=ids.INVALID_USER_ID,
+            x_telegram_user_id=None,
             request=resource.ResourceChangeMessage(
                 request_id=SPACE_CREATED_REQUEST_ID,
-                resource=resource.ResourceRef(type=fields.ResourceType.SPACE, id=SPACE_ID),
+                resource=resource.ResourceWithAttributes(
+                    type=fields.ResourceType.SPACE,
+                    id=SPACE_ID,
+                    attributes={fields.SPACE_TYPE_FIELD: SpaceType.SHARED},
+                ),
                 operation=fields.Operation.CREATE,
                 change_type=fields.ChangeType.RESOURCE_ADDED,
                 relations=resource.ResourceRelations(
@@ -476,11 +495,12 @@ CREATE_SPACE_CASES = (
             service_name=audit.AUTH_SERVICE_NAME,
             level=audit.Level.ERROR,
             cause=audit.Message.NOT_FOUND,
+            message="User is not registered",
             error_code=audit.ErrorCode.USER_NOT_FOUND,
             kind=audit.Kind.VALIDATION,
             operation=audit.Operation.FGA_UPDATE_RESOURCE,
             status=audit.Status.FAILED,
-            context={fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT, fields.USER_ID_FIELD: ids.INVALID_USER_ID},
+            context={fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT, audit.STAGE_FIELD: "identify_actor"},
         ),
         id="user not found",
     ),
@@ -523,7 +543,7 @@ CREATE_REMINDER_CASES = (
                 idempotency_key="",
                 status=fields.Status.COMPLETED,
                 operation_result=fields.OperationResult.APPLIED,
-                resource=resource.ResourceRef(
+                resource=resource.ResourceWithAttributes(
                     type=fields.ResourceType.REMINDER, id=REMINDER_ID
                 ),
                 written_tuples=(
@@ -592,6 +612,7 @@ CREATE_REMINDER_CASES = (
         audit.AuditMessage(
             service_name=audit.AUTH_SERVICE_NAME,
             level=audit.Level.ERROR,
+            message="OpenFGA rejected the tuple changes",
             cause=(
                 f'POST validation error for Write POST with body {{"code":"write_failed_due_to_invalid_input",'
                 f'"message":"cannot write a tuple which already exists: user: \'user:{REMINDER_OWNER_ID}\', relation: \'owner\', object: \'reminder:{REMINDER_ID}\': tuple to be written already existed or the tuple to be deleted did not exist"}}\n'
@@ -603,14 +624,14 @@ CREATE_REMINDER_CASES = (
             status=audit.Status.FAILED,
             context={
                 fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT,
-                fields.USER_ID_FIELD: ids.ADMIN_USER_ID,
+                fields.USER_ID_FIELD: ids.ADMIN_USER_ID_UUID,
             },
         ),
         id="reminder already exists",
     ),
     pytest.param(
         UpdateResourceCase(
-            x_telegram_user_id=ids.INVALID_USER_ID,
+            x_telegram_user_id=None,
             request=resource.ResourceChangeMessage(
                 request_id=REMINDER_CREATED_REQUEST_ID,
                 resource=resource.ResourceRef(
@@ -655,13 +676,14 @@ CREATE_REMINDER_CASES = (
             service_name=audit.AUTH_SERVICE_NAME,
             level=audit.Level.ERROR,
             cause=audit.Message.NOT_FOUND,
+            message="User is not registered",
             error_code=audit.ErrorCode.USER_NOT_FOUND,
             kind=audit.Kind.VALIDATION,
             operation=audit.Operation.FGA_UPDATE_RESOURCE,
             status=audit.Status.FAILED,
             context={
                 fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT,
-                fields.USER_ID_FIELD: ids.INVALID_USER_ID,
+                audit.STAGE_FIELD: "identify_actor",
             },
         ),
         id="user not found",
@@ -694,13 +716,13 @@ UPDATE_RESOURCE_INVALID_TOKEN_CASES = (
         audit.AuditMessage(
             service_name=audit.AUTH_SERVICE_NAME,
             level=audit.Level.WARN,
-            message=audit.Message.FAILED_TO_VALIDATE_TOKEN,
+            message=audit.TOKEN_VERIFICATION_FAILED,
             cause="token has invalid claims: token is expired",
-            error_code=audit.ErrorCode.AUTH_TOKEN_EXPIRED,
+            error_code=audit.ErrorCode.AUTH_TOKEN_INVALID,
             kind=audit.Kind.VALIDATION,
-            operation=audit.Operation.AUTH_SERVICE_CHECK_TOKEN,
+            operation=audit.Operation.FGA_UPDATE_RESOURCE,
             status=audit.Status.FAILED,
-            context={fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT},
+            context={fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT, audit.STAGE_FIELD: audit.AUTHENTICATE},
         ),
         id="expired token",
     ),
@@ -715,13 +737,13 @@ UPDATE_RESOURCE_INVALID_TOKEN_CASES = (
         audit.AuditMessage(
             service_name=audit.AUTH_SERVICE_NAME,
             level=audit.Level.WARN,
-            message=audit.Message.NO_PREFIX_BEARER,
+            message=audit.TOKEN_VERIFICATION_FAILED,
             error_code=audit.ErrorCode.AUTH_TOKEN_INVALID,
             cause="invalid token: no prefix Bearer",
             kind=audit.Kind.VALIDATION,
-            operation=audit.Operation.AUTH_SERVICE_CHECK_TOKEN,
+            operation=audit.Operation.FGA_UPDATE_RESOURCE,
             status=audit.Status.FAILED,
-            context={fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT},
+            context={fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT, audit.STAGE_FIELD: audit.AUTHENTICATE},
         ),
         id="no token",
     ),
@@ -739,7 +761,7 @@ UPDATE_RESOURCE_INVALID_TOKEN_CASES = (
             expected_message="invalid token: invalid client id",
             expected_response=None,
         ),
-        None,
+        request_audit.rejected_client(audit.Operation.FGA_UPDATE_RESOURCE),
         id="token without sub",
     ),
     pytest.param(
@@ -759,13 +781,13 @@ UPDATE_RESOURCE_INVALID_TOKEN_CASES = (
         audit.AuditMessage(
             service_name=audit.AUTH_SERVICE_NAME,
             level=audit.Level.WARN,
-            message=audit.Message.FAILED_TO_VALIDATE_TOKEN,
+            message=audit.TOKEN_VERIFICATION_FAILED,
             cause="token has invalid claims: token is missing required claim: iss claim is required",
             error_code=audit.ErrorCode.AUTH_TOKEN_INVALID,
             kind=audit.Kind.VALIDATION,
-            operation=audit.Operation.AUTH_SERVICE_CHECK_TOKEN,
+            operation=audit.Operation.FGA_UPDATE_RESOURCE,
             status=audit.Status.FAILED,
-            context={fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT},
+            context={fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT, audit.STAGE_FIELD: audit.AUTHENTICATE},
         ),
         id="token without iss",
     ),
@@ -786,13 +808,13 @@ UPDATE_RESOURCE_INVALID_TOKEN_CASES = (
         audit.AuditMessage(
             service_name=audit.AUTH_SERVICE_NAME,
             level=audit.Level.WARN,
-            message=audit.Message.FAILED_TO_VALIDATE_TOKEN,
+            message=audit.TOKEN_VERIFICATION_FAILED,
             cause="token has invalid claims: token is missing required claim: exp claim is required",
             error_code=audit.ErrorCode.AUTH_TOKEN_INVALID,
             kind=audit.Kind.VALIDATION,
-            operation=audit.Operation.AUTH_SERVICE_CHECK_TOKEN,
+            operation=audit.Operation.FGA_UPDATE_RESOURCE,
             status=audit.Status.FAILED,
-            context={fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT},
+            context={fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT, audit.STAGE_FIELD: audit.AUTHENTICATE},
         ),
         id="token without exp",
     ),
@@ -810,7 +832,7 @@ UPDATE_RESOURCE_INVALID_TOKEN_CASES = (
             expected_message="invalid token: invalid scope",
             expected_response=None,
         ),
-        None,
+        request_audit.rejected_client(audit.Operation.FGA_UPDATE_RESOURCE),
         id="token without scope",
     ),
     pytest.param(
@@ -830,13 +852,13 @@ UPDATE_RESOURCE_INVALID_TOKEN_CASES = (
         audit.AuditMessage(
             service_name=audit.AUTH_SERVICE_NAME,
             level=audit.Level.WARN,
-            message=audit.Message.FAILED_TO_VALIDATE_TOKEN,
+            message=audit.TOKEN_VERIFICATION_FAILED,
             cause="token has invalid claims: token is missing required claim: aud claim is required",
             error_code=audit.ErrorCode.AUTH_TOKEN_INVALID,
             kind=audit.Kind.VALIDATION,
-            operation=audit.Operation.AUTH_SERVICE_CHECK_TOKEN,
+            operation=audit.Operation.FGA_UPDATE_RESOURCE,
             status=audit.Status.FAILED,
-            context={fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT},
+            context={fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT, audit.STAGE_FIELD: audit.AUTHENTICATE},
         ),
         id="token without aud",
     ),
@@ -857,13 +879,13 @@ UPDATE_RESOURCE_INVALID_TOKEN_CASES = (
         audit.AuditMessage(
             service_name=audit.AUTH_SERVICE_NAME,
             level=audit.Level.WARN,
-            message=audit.Message.FAILED_TO_VALIDATE_TOKEN,
+            message=audit.TOKEN_VERIFICATION_FAILED,
             cause="token is missing required claim: iat claim is required",
             error_code=audit.ErrorCode.AUTH_TOKEN_INVALID,
             kind=audit.Kind.VALIDATION,
-            operation=audit.Operation.AUTH_SERVICE_CHECK_TOKEN,
+            operation=audit.Operation.FGA_UPDATE_RESOURCE,
             status=audit.Status.FAILED,
-            context={"iat": "iat claim is required", fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT},
+            context={fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT, audit.STAGE_FIELD: audit.AUTHENTICATE},
         ),
         id="token without iat",
     ),
@@ -884,8 +906,26 @@ UPDATE_RESOURCE_INVALID_TOKEN_CASES = (
             ),
             expected_response=None,
         ),
-        None,
+        request_audit.missing_telegram_header(audit.Operation.FGA_UPDATE_RESOURCE),
         id="no x-telegram-user-id",
+    ),
+    pytest.param(
+        InvalidUpdateResourceTokenCase(
+            token_fields=TokenFields(
+                iss=fields.ISSUER_AUTH_SERVICE,
+                aud=[fields.AUDIENCE_INTERNAL_API],
+                sub=fields.SUBJECT_BOT,
+                iat=int(time.time()),
+                exp=int(time.time()) + ONE_HOUR_SECONDS,
+                scope=fields.SCOPE_BOT,
+            ),
+            expected_status_code=httpx.codes.BAD_REQUEST,
+            telegram_user_id=ids.INVALID_USER_ID,
+            expected_message="invalid Telegram user ID",
+            expected_response=None,
+        ),
+        request_audit.malformed_telegram_header(audit.Operation.FGA_UPDATE_RESOURCE),
+        id="leading zeros in x-telegram-user-id",
     ),
     pytest.param(
         InvalidUpdateResourceTokenCase(
@@ -902,7 +942,7 @@ UPDATE_RESOURCE_INVALID_TOKEN_CASES = (
         expected_message=audit.Message.INVALID_CLIENT,
             expected_response=None,
         ),
-        None,
+        request_audit.rejected_client(audit.Operation.FGA_UPDATE_RESOURCE),
         id="invalid client",
     ),
     pytest.param(
@@ -923,13 +963,13 @@ UPDATE_RESOURCE_INVALID_TOKEN_CASES = (
         audit.AuditMessage(
             service_name=audit.AUTH_SERVICE_NAME,
             level=audit.Level.WARN,
-            message=audit.Message.FAILED_TO_VALIDATE_TOKEN,
+            message=audit.TOKEN_VERIFICATION_FAILED,
             cause="token has invalid claims: token has invalid issuer",
             error_code=audit.ErrorCode.AUTH_TOKEN_INVALID,
             kind=audit.Kind.VALIDATION,
-            operation=audit.Operation.AUTH_SERVICE_CHECK_TOKEN,
+            operation=audit.Operation.FGA_UPDATE_RESOURCE,
             status=audit.Status.FAILED,
-            context={fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT},
+            context={fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT, audit.STAGE_FIELD: audit.AUTHENTICATE},
         ),
         id="invalid issuer",
     ),
@@ -951,13 +991,13 @@ UPDATE_RESOURCE_INVALID_TOKEN_CASES = (
         audit.AuditMessage(
             service_name=audit.AUTH_SERVICE_NAME,
             level=audit.Level.WARN,
-            message=audit.Message.FAILED_TO_VALIDATE_TOKEN,
+            message=audit.TOKEN_VERIFICATION_FAILED,
             cause="token has invalid claims: token has invalid audience",
             error_code=audit.ErrorCode.AUTH_TOKEN_INVALID,
             kind=audit.Kind.VALIDATION,
-            operation=audit.Operation.AUTH_SERVICE_CHECK_TOKEN,
+            operation=audit.Operation.FGA_UPDATE_RESOURCE,
             status=audit.Status.FAILED,
-            context={fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT},
+            context={fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT, audit.STAGE_FIELD: audit.AUTHENTICATE},
         ),
         id="invalid aud",
     ),
@@ -979,13 +1019,13 @@ UPDATE_RESOURCE_INVALID_TOKEN_CASES = (
         audit.AuditMessage(
             service_name=audit.AUTH_SERVICE_NAME,
             level=audit.Level.WARN,
-            message="failed to validate token",
+            message=audit.TOKEN_VERIFICATION_FAILED,
             cause="token has invalid claims: token used before issued",
             error_code=audit.ErrorCode.AUTH_TOKEN_INVALID,
             kind=audit.Kind.VALIDATION,
-            operation=audit.Operation.AUTH_SERVICE_CHECK_TOKEN,
+            operation=audit.Operation.FGA_UPDATE_RESOURCE,
             status=audit.Status.FAILED,
-            context={fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT},
+            context={fields.USER_AGENT_FIELD: audit.TEST_USER_AGENT, audit.STAGE_FIELD: audit.AUTHENTICATE},
         ),
         id="invalid iat",
     ),
@@ -1004,7 +1044,7 @@ UPDATE_RESOURCE_INVALID_TOKEN_CASES = (
             expected_message="client does not have required scope",
             expected_response=None,
         ),
-        None,
+        request_audit.rejected_client(audit.Operation.FGA_UPDATE_RESOURCE),
         id="invalid scope",
     ),
     pytest.param(
@@ -1022,7 +1062,7 @@ UPDATE_RESOURCE_INVALID_TOKEN_CASES = (
             expected_message=audit.Message.INVALID_CLIENT,
             expected_response=None,
         ),
-        None,
+        request_audit.rejected_client(audit.Operation.FGA_UPDATE_RESOURCE),
         id="invalid client id",
     ),
     pytest.param(
@@ -1040,28 +1080,30 @@ UPDATE_RESOURCE_INVALID_TOKEN_CASES = (
             expected_message=audit.Message.INVALID_CLIENT,
             expected_response=None,
         ),
-        None,
+        request_audit.rejected_client(audit.Operation.FGA_UPDATE_RESOURCE),
         id="invalid client id with telegram user",
     ),
 )
-"""Тест на обновление ресурса.
+"""Отказ в доступе к resources/update до синхронизации ресурса.
 
-- Протухший токен - 401
-- Токена нет - 401
-- В токене нет sub - 401
-- В токене нет iss - 401
-- В токене нет exp - 401
-- В токене нет scope - 401
-- В токене нет aud - 401
-- В токене нет iat - 401
-- Нет хедера x-telegram-user-id - 401
-- Неправильный sub - 401
-- Неправильный iss - 401
-- Неправильный aud - 401
-- Неправильный iat - 401
-- Неправильный scope - 401
-- Неправильный client_id - 401
-- Неправильный x_telegram_user_id - 401
+- Telegram ID с ведущими нулями при действительном JWT: 400 Bad Request и аудит ошибки формата.
+
+- Токен просрочен: 401 Unauthorized.
+- Токен отсутствует: 401 Unauthorized.
+- В JWT отсутствует sub (идентификатор клиента): 401 Unauthorized.
+- В JWT отсутствует iss (издатель): 401 Unauthorized.
+- В JWT отсутствует exp (срок действия): 401 Unauthorized.
+- В JWT отсутствует scope (права клиента): 401 Unauthorized.
+- В JWT отсутствует aud (получатель): 401 Unauthorized.
+- В JWT отсутствует iat (время выдачи): 401 Unauthorized.
+- Токен валиден, но отсутствует заголовок X-Telegram-User-Id: 401 Unauthorized.
+- В sub передан клиент admin вместо bot: 401 Unauthorized.
+- Указан другой издатель (iss): 401 Unauthorized.
+- Указан другой получатель (aud): 401 Unauthorized.
+- Время выдачи токена (iat) находится в будущем: 401 Unauthorized.
+- Клиент bot передал scope admin: 401 Unauthorized.
+- В sub передан неизвестный клиент bot2, заголовок X-Telegram-User-Id отсутствует: 401 Unauthorized.
+- Тот же неизвестный клиент передал X-Telegram-User-Id: 401 Unauthorized, причина по-прежнему в клиенте.
 """
 
 
@@ -1105,7 +1147,7 @@ UPDATE_RESOURCE_VALIDATION_ERRORS_CASES = (
                 code=audit.ErrorCode.OWNER_TYPE_INVALID,
                 message=audit.Message.OWNER_TYPE_INVALID,
                 detailed_error=resource.DetailedError(
-                    value=resource.ResourceRef(
+                    value=resource.ResourceWithAttributes(
                         type=fields.ResourceType.SPACE, id=NOTE_OWNER_ID
                     ),
                 ),
@@ -1153,7 +1195,7 @@ UPDATE_RESOURCE_VALIDATION_ERRORS_CASES = (
                 code=audit.ErrorCode.PARENT_TYPE_INVALID,
                 message=audit.Message.PARENT_TYPE_INVALID,
                 detailed_error=resource.DetailedError(
-                    value=resource.ResourceRef(
+                    value=resource.ResourceWithAttributes(
                         type=fields.ResourceType.USER, id=NOTE_SPACE_ID
                     ),
                 ),
@@ -1257,7 +1299,7 @@ UPDATE_RESOURCE_VALIDATION_ERRORS_CASES = (
             message=audit.Message.PARENT_NOT_ALLOWED,
             detailed_error=resource.DetailedError(
                 message="spaces do not have parents, only owners",
-                value=resource.ResourceRef(
+                value=resource.ResourceWithAttributes(
                     type=fields.ResourceType.SPACE, id=NOTE_SPACE_ID
                 ),
             ),
@@ -1317,16 +1359,16 @@ UPDATE_RESOURCE_VALIDATION_ERRORS_CASES = (
         id="space: event type mismatch",
     ),
 )
-"""Тест на валидацию запросов update_resource при создании ресурсов.
+"""Ошибки синхронизации ресурсов с валидным токеном.
 
-
-Заметки и напоминания:
-- обязательны relations.owner (type=user) и relations.parent (type=space)
-- change_type только из NOTE_AND_REMINDER_CHANGE_TYPES
-- event_type должен соответствовать операции (для create — *_CREATED)
-
-Пространства:
-- обязателен owner, parent запрещён
-- change_type только из SPACE_CHANGE_TYPES
-- event_type должен соответствовать операции
+- Создание заметки или напоминания без relations.owner: 400 Bad Request.
+- Владельцем заметки или напоминания указано пространство вместо пользователя: 400 Bad Request.
+- Создание заметки или напоминания без relations.parent: 400 Bad Request.
+- В relations.parent заметки или напоминания указан пользователь вместо пространства: 400 Bad Request.
+- При обновлении заметки или напоминания передан change_type изменения состава участников: 400 Bad Request.
+- При создании заметки передан NOTE_UPDATED или при создании напоминания передан REMINDER_UPDATED: 400 Bad Request.
+- Создание пространства без relations.owner: 400 Bad Request.
+- При создании пространства указан relations.parent: 400 Bad Request.
+- Обновление пространства с change_type перемещения ресурса: 400 Bad Request.
+- Для создания пространства передан тип события SPACE_UPDATED: 400 Bad Request.
 """

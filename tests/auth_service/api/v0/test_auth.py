@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Callable, ContextManager, Optional
+from typing import Any, Callable
 
 import pytest
 
@@ -9,13 +9,12 @@ from parameters.auth_service.auth import (
     LOGIN_SUCCESS_CASES,
 )
 from src.api_clients.auth_service import AuthServiceV0APIClient
-from src.common import audit, fields
+from src.common import fields
 from src.common.server_error_logging import log_internal_server_error
 from src.storages.postgres_client import PostgresClient
 from tests.auth_service.api.v0.auth_login_support import postgres_sql_migration
 from tests.fixtures.auth_jwt import check_token_fields
 from tests.fixtures.vault import LoginSecretBundle
-from assertions.auth_service import assert_audit_payload
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +37,9 @@ class TestAuthServiceV0Login:
         expected_status_code: int,
         get_client_secret: Callable[[str], str],
     ) -> None:
-        """Тест на успешные запросы на авторизацию."""
+        """Получает JWT для сервисного клиента по секрету из Vault.
+        Проверяет тип, срок действия, выданный scope и подписанные поля токена.
+        """
         with postgres_sql_migration(postgres_client, up_sql, down_sql):
             assert postgres_client.raw_connection.info is not None
             client_secret = get_client_secret(req["client_id"])
@@ -77,7 +78,6 @@ class TestAuthServiceV0Login:
             "down_sql",
             "login_secret_bundle",
             "expected_status_code",
-            "expected_audit_message",
         ),
         LOGIN_INVALID_REQUEST_CASES,
         indirect=["login_secret_bundle"],
@@ -93,10 +93,12 @@ class TestAuthServiceV0Login:
         client_id: str,
         expected_status_code: int,
         login_secret_bundle: LoginSecretBundle,
-        auth_service_error_messages_from_rabbitmq: ContextManager[Optional[bytes]],
-        expected_audit_message: audit.AuditMessage,
     ) -> None:
-        """Тест на невалидные запросы на авторизацию."""
+        """Проверяет отказ в выдаче токена при неверных реквизитах, состоянии клиента или параметрах доступа.
+
+        Неизвестный или отключённый клиент, неверный секрет и отсутствие секрета в Vault приводят к 401 Unauthorized.
+        Неподдерживаемый grant_type даёт 400 Bad Request, а попытка получить невыданные права — 403 Forbidden.
+        """
         with postgres_sql_migration(postgres_client, up_sql, down_sql):
             assert postgres_client.raw_connection.info is not None
 
@@ -108,9 +110,6 @@ class TestAuthServiceV0Login:
 
             log_internal_server_error(response, logger, fields.ERROR_FIELD)
 
-            with auth_service_error_messages_from_rabbitmq as rabbitmq_message:
-                message = rabbitmq_message
-            assert_audit_payload(message, expected_audit_message)
 
             assert expected_status_code == response.status_code
             assert expected_message == response.json()[fields.ERROR_FIELD]
@@ -120,7 +119,6 @@ class TestAuthServiceV0Login:
             "body",
             "expected_message",
             "expected_status_code",
-            "expected_audit_message",
         ),
         LOGIN_INVALID_BODY_CASES,
     )
@@ -130,17 +128,16 @@ class TestAuthServiceV0Login:
         body: dict[str, Any],
         expected_message: str,
         expected_status_code: int,
-        expected_audit_message: audit.AuditMessage,
-        auth_service_error_messages_from_rabbitmq: ContextManager[Optional[bytes]],
     ) -> None:
-        """Тест на невалидные запросы на авторизацию."""
+        """Проверяет, как сервис отвечает на неполный запрос о выдаче токена.
+
+        Пустой объект и объект с одним неизвестным полем дают 400 Bad Request. Если переданы секрет и grant_type,
+        но отсутствует идентификатор клиента, сервис отвечает 401 Unauthorized.
+        """
         response = auth_service_v0_api_client.login(body)
 
         log_internal_server_error(response, logger, fields.ERROR_FIELD)
 
-        with auth_service_error_messages_from_rabbitmq as rabbitmq_message:
-            message = rabbitmq_message
-            assert_audit_payload(message, expected_audit_message)
 
         assert expected_status_code == response.status_code
         assert expected_message == response.json()[fields.ERROR_FIELD]

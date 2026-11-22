@@ -35,6 +35,9 @@ NOTES_FIELD = "notes"
 CAN_READ_FIELD = "can_read"
 CAN_EDIT_FIELD = "can_edit"
 
+# Поля запросов на синхронизацию ресурсов и проверку решений.
+SPACE_TYPE_FIELD = "space_type"
+
 # UPDATE RESOURCE FIELDS
 NOTES_SERVICE_NAME = "notes-service"
 class ResourceType(StrEnum):

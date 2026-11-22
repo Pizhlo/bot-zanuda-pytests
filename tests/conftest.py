@@ -3,6 +3,7 @@ import pytest
 pytest.register_assert_rewrite("assertions.webserver")
 
 pytest_plugins = [
+    "tests.fixtures.telegram",
     "tests.fixtures.webserver",
     "tests.fixtures.rabbitmq",
     "tests.fixtures.auth_service",

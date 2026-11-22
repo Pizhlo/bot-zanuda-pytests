@@ -242,3 +242,10 @@ IDs/digests and pytest results, then attempt cleanup even after preparation or l
 errors. Local container success SHALL clean up its resources; failures SHALL retain
 them and diagnostics. Host runs SHALL retain IDE infrastructure. Cleanup SHALL
 never adopt or remove another project's resources.
+
+
+### Auth-service compatibility with BZ-167
+
+For note filtering and resource synchronization, check the single HTTP audit event and its first failure. The event identifies the endpoint operation, the stage, the safe cause and the verified internal user when available. Login tests check the JWT or the HTTP error. Audit assertions for login are deferred until HTTP login auditing is implemented.
+
+A successful synchronization returns the resource with its attributes (null when absent). Space creation requires the verified owner and space type, and returns the owner, created and type relationships. An error identifies the resource by type and ID.
