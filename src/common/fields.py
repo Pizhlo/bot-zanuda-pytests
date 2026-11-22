@@ -36,7 +36,19 @@ CAN_READ_FIELD = "can_read"
 CAN_EDIT_FIELD = "can_edit"
 
 # Поля запросов на синхронизацию ресурсов и проверку решений.
+REQUEST_ID_FIELD = "request_id"
+SUBJECT_FIELD = "subject"
+ACTION_FIELD = "action"
+RESOURCE_FIELD = "resource"
+TYPE_FIELD = "type"
+ID_FIELD = "id"
+NAME_FIELD = "name"
+ATTRIBUTES_FIELD = "attributes"
+OPTIONS_FIELD = "options"
+INCLUDE_REASONS_FIELD = "include_reasons"
+CONSISTENCY_FIELD = "consistency"
 SPACE_TYPE_FIELD = "space_type"
+DECISION_ID_FIELD = "decision_id"
 
 # UPDATE RESOURCE FIELDS
 NOTES_SERVICE_NAME = "notes-service"

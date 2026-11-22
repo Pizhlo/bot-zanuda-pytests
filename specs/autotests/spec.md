@@ -249,3 +249,8 @@ never adopt or remove another project's resources.
 For note filtering and resource synchronization, check the single HTTP audit event and its first failure. The event identifies the endpoint operation, the stage, the safe cause and the verified internal user when available. Login tests check the JWT or the HTTP error. Audit assertions for login are deferred until HTTP login auditing is implemented.
 
 A successful synchronization returns the resource with its attributes (null when absent). Space creation requires the verified owner and space type, and returns the owner, created and type relationships. An error identifies the resource by type and ID.
+
+
+### Single-action decisions
+
+Exercise POST /api/v0/decisions/check as a registered bot user against the pinned authorization model and field policy. Check the HTTP outcome, stable reason codes and the requested identity, action and resource. Repeating a request ID creates a new decision, including for a denial. Persisted reasons are independent of whether the HTTP client requested them. A mismatched subject returns 403 and creates no decision. Fixtures own their SQL identities, decision request IDs and graph objects, including cleanup after a failed assertion.
