@@ -39,7 +39,11 @@ on:
   workflow_dispatch:
     inputs:
       auth_image:
-        description: Полная ссылка на образ auth-service; пустое значение использует Secrets и latest
+        description: Образ auth-service для ручного запуска (по умолчанию собирается из auth_ref)
+        type: string
+
+      auth_ref:
+        description: Ревизия auth-service для сборки и строгой модели OpenFGA
         type: string
 
 jobs:
@@ -52,9 +56,8 @@ jobs:
       contents: read
     env:
       CI: 'true'
-      # Ручной запуск позволяет проверить тестовый тег без обновления latest.
-      AUTH_IMAGE_REPOSITORY: ${{ secrets.AUTH_SERVICE_IMAGE_REPOSITORY }}
-      AUTH_IMAGE: ${{ inputs.auth_image || format('{0}:latest', secrets.AUTH_SERVICE_IMAGE_REPOSITORY) }}
+      AUTH_IMAGE_OVERRIDE: ${{ inputs.auth_image }}
+      AUTH_FGA_MODEL_FILE: ${{ github.workspace }}/.testkit-runs/auth-source/fga/auth-model.fga
       # Повторный запуск задания получает новый изолированный проект.
       RUN_ID: auth-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
@@ -66,15 +69,35 @@ jobs:
           # Поддерживаем оба существующих имени токена для приватного сабмодуля.
           token: ${{ secrets.CI_GITHUB_TOKEN || secrets.GH_TOKEN || github.token }}
           persist-credentials: false
-      # Пустой secret не должен незаметно включать локальный адрес образа по умолчанию.
-      - name: Проверить настройку образа
-        env:
-          AUTH_IMAGE_OVERRIDE: ${{ inputs.auth_image }}
+      - name: Получить исходники сервиса и модель той же ревизии
+        uses: actions/checkout@v4
+        with:
+          repository: Pizhlo/bot-zanuda-auth-service
+          ref: ${{ inputs.auth_ref || vars.AUTH_SERVICE_REF || 'main' }}
+          path: .testkit-runs/auth-source
+          token: ${{ secrets.CI_GITHUB_TOKEN || secrets.GH_TOKEN || github.token }}
+          persist-credentials: false
+      - name: Выбрать образ для интеграционных тестов
+        working-directory: .testkit-runs/auth-source
         run: |
-          if [ -z "$AUTH_IMAGE_OVERRIDE" ] && [ -z "$AUTH_IMAGE_REPOSITORY" ]; then
-            echo "::error::Добавьте Actions secret AUTH_SERVICE_IMAGE_REPOSITORY (репозиторий образа без тега)."
-            exit 1
+          revision=$(git rev-parse HEAD)
+          if [ -n "$AUTH_IMAGE_OVERRIDE" ]; then
+            docker pull -- "$AUTH_IMAGE_OVERRIDE"
+            image_id=$(docker image inspect --format '{{.Id}}' -- "$AUTH_IMAGE_OVERRIDE")
+            image_revision=$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image_id")
+            if [ "$image_revision" != "$revision" ]; then
+              echo "::error::Ревизия образа auth_image должна совпадать с checkout $revision (метка org.opencontainers.image.revision)."
+              exit 1
+            fi
+          else
+            docker build -t "auth-under-test:$revision" \
+              --label "org.opencontainers.image.revision=$revision" \
+              --build-arg VERSION="$revision" --build-arg GIT_COMMIT="$revision" \
+              --build-arg BUILD_DATE="$(git show -s --format=%cI)" .
+            image_id=$(docker image inspect --format '{{.Id}}' "auth-under-test:$revision")
           fi
+          echo "AUTH_REF=$revision" >> "$GITHUB_ENV"
+          echo "AUTH_IMAGE=$image_id" >> "$GITHUB_ENV"
       - name: Установить зависимость скрипта запуска
         run: sudo apt-get update && sudo apt-get install -y python3-yaml
       - name: Выполнить полный прогон тестов auth-service
