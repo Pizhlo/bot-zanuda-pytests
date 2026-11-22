@@ -1,8 +1,317 @@
-language: "ru-RU"
+
+language: ru-RU
+early_access: false
+
+tone_instructions: >
+  Be strict, precise and constructive. Focus on test
+  correctness, reliability and meaningful coverage.
+  Explain concrete failure scenarios. Avoid style nitpicks
+  and unnecessary abstractions.
+
 reviews:
-  profile: "chill"
+  profile: assertive
+
   high_level_summary: true
+  high_level_summary_in_walkthrough: true
+  changed_files_summary: true
+  collapse_walkthrough: true
+  review_status: true
+  review_info: true
+  review_details: true
+  estimate_code_review_effort: true
+  enable_prompt_for_ai_agents: true
+
+  auto_approvals:
+    enabled: false
+
+  # Avoid automatic reviews after every push.
   auto_review:
     enabled: true
+    auto_incremental_review: false
     drafts: false
-    base_branches: [".*"]
+
+  high_level_summary_instructions: |
+    Summarize changes from a test engineering perspective.
+
+    Highlight:
+    - New and modified integration test scenarios.
+    - Changes in test fixtures and infrastructure.
+    - Behavioral coverage added or removed.
+    - Risks to test isolation and determinism.
+    - Changes to database preparation and cleanup.
+    - Potential false positives and false negatives.
+
+    Avoid generic summaries of renamed variables
+    or cosmetic code changes.
+
+  merge_risk_instructions: |
+    This repository contains Python integration tests
+    for independently deployed backend services.
+
+    Consider changes high risk when they:
+    - Weaken or remove meaningful assertions.
+    - Allow tests to pass despite incorrect behavior.
+    - Introduce shared state or order dependencies.
+    - Change database initialization or cleanup.
+    - Modify authentication or authorization setup.
+    - Hide failures or silently skip checks.
+    - Break CI execution or environment isolation.
+    - Make tests depend on unreliable timing.
+
+    Pure refactoring that preserves test behavior
+    is generally lower risk.
+
+  # Exclude only generated artifacts.
+  # Keep test code, SQL, config and fixtures in review.
+  path_filters:
+    - "!**/__pycache__/**"
+    - "!**/.pytest_cache/**"
+    - "!**/.mypy_cache/**"
+    - "!**/.ruff_cache/**"
+    - "!**/.tox/**"
+    - "!**/htmlcov/**"
+    - "!**/coverage/**"
+    - "!**/*.pyc"
+    - "!**/*.log"
+
+  path_instructions:
+    # General Python engineering rules.
+    - path: "**/*.py"
+      instructions: |
+        Review for correctness, reliability and clarity.
+
+        Check:
+        - Exception handling and propagation.
+        - Incorrect None handling and missing guards.
+        - Type annotation consistency.
+        - Mutable default arguments.
+        - Unintended shared mutable state.
+        - Resource ownership and cleanup.
+        - Context manager usage.
+        - Incorrect async and await usage.
+        - Configuration and environment handling.
+        - Unnecessary complexity and abstractions.
+
+        Project conventions:
+        - Prefer clear functions for stateless operations.
+        - Use classes when they represent meaningful state
+          or behavior.
+        - Use Protocol for useful structural contracts,
+          not as an abstraction for every dependency.
+        - Prefer explicit types over Any where practical.
+        - Document non-obvious design decisions.
+        - Preserve the project's existing architecture.
+        - Do not introduce abstractions without benefits.
+
+        Before reporting a finding:
+        - Verify that the problematic path is reachable.
+        - Examine relevant callers and surrounding code.
+        - Explain the realistic failure scenario.
+        - Suggest a minimal correction.
+
+        Avoid subjective formatting feedback.
+        Do not duplicate findings handled by linters.
+
+    # All pytest test modules.
+    - path: "**/test_*.py"
+      instructions: |
+        This is an integration test repository.
+
+        The primary goal is to detect incorrect behavior,
+        not merely execute code without exceptions.
+
+        Check:
+        - Tests validate actual observable behavior.
+        - Assertions distinguish success from failure.
+        - Expected values are meaningful and independent
+          from the values being tested.
+        - Relevant error paths are covered.
+        - Important edge cases are tested.
+        - Positive and negative scenarios are balanced.
+        - Tests do not silently pass without assertions.
+        - Tests do not accidentally skip important checks.
+        - Tests fail when the system behavior is incorrect.
+        - Status codes and response bodies are validated
+          when relevant.
+        - Persistent state is verified where necessary.
+
+        Detect:
+        - False positives caused by weak assertions.
+        - Incorrect exception expectations.
+        - Assertions that repeat the implementation logic.
+        - Tests that validate mocks instead of real behavior.
+        - Hardcoded assumptions unrelated to requirements.
+        - Test order dependencies.
+        - State leakage between cases.
+        - Invalid parametrization.
+        - Unnecessary duplication of test logic.
+
+        Do not require every test to verify every field.
+
+        Do not recommend excessive mocking in
+        integration tests.
+
+        Prefer verifying actual service interactions.
+
+    # Test fixtures and shared setup.
+    - path: "**/conftest.py"
+      instructions: |
+        Review pytest fixtures and shared setup carefully.
+
+        Check:
+        - Fixture scope matches resource lifetime.
+        - Setup and teardown are correctly paired.
+        - Cleanup executes after test failures.
+        - Fixtures do not leak state between tests.
+        - Shared fixtures remain safe for parallel execution.
+        - Dependencies between fixtures are explicit.
+        - Resources are released correctly.
+        - External services are checked for readiness.
+        - Configuration failures are visible.
+        - Fixture failures are not silently ignored.
+
+        Prefer yield fixtures when teardown is required.
+
+        Check whether session-scoped fixtures mutate
+        state used by function-scoped tests.
+
+        Avoid large fixtures with unrelated responsibilities.
+
+        Avoid introducing generic fixture frameworks
+        without a concrete need.
+
+    # Additional test naming convention.
+    - path: "**/*_test.py"
+      instructions: |
+        Apply the same integration test quality rules
+        as for test_*.py modules.
+
+        Check assertions, isolation, determinism,
+        negative scenarios and state verification.
+
+    # SQL fixtures, migrations and test data.
+    - path: "**/*.sql"
+      instructions: |
+        Review SQL from an integration testing perspective.
+
+        Check:
+        - Correct test data relationships.
+        - Referential integrity and foreign keys.
+        - Unique constraint handling.
+        - Idempotent data initialization.
+        - Transaction boundaries and rollback.
+        - Concurrent initialization hazards.
+        - Conflict handling and repeated execution.
+        - Dependency order between SQL files.
+        - Compatibility with the current schema.
+        - Accidental modification of unrelated records.
+
+        When ON CONFLICT is used:
+        - Verify conflict targets are appropriate.
+        - Verify updates preserve intended test data.
+        - Detect silent acceptance of incorrect state.
+
+        Do not recommend clearing the entire database
+        when tests must preserve unrelated records.
+
+        Prefer deterministic, explicit test data.
+
+    # Environment and infrastructure configuration.
+    - path: "**/*.{yaml,yml}"
+      instructions: |
+        Review test infrastructure configuration.
+
+        Check:
+        - Environment variable propagation.
+        - Service URLs and connection settings.
+        - Invalid or missing required configuration.
+        - Unsafe or inconsistent defaults.
+        - Docker Compose service dependencies.
+        - Health checks and readiness.
+        - Incorrect test environment assumptions.
+        - Credential exposure.
+        - CI configuration correctness.
+
+        Distinguish configuration validation errors
+        from actual runtime behavior.
+
+        Do not require production hardening for
+        intentionally isolated test services unless
+        a concrete exposure risk exists.
+
+    # JSON test fixtures and schemas.
+    - path: "**/*.json"
+      instructions: |
+        Check:
+        - Fixture validity and schema consistency.
+        - Correct identifiers and relationships.
+        - Expected values matching test intent.
+        - Missing required fields.
+        - Unintended changes to shared test data.
+        - Inconsistency between request and response data.
+
+        Ignore formatting-only concerns.
+
+    # Python dependency and test configuration.
+    - path: "pyproject.toml"
+      instructions: |
+        Check:
+        - pytest configuration correctness.
+        - Dependency compatibility.
+        - Test discovery behavior.
+        - Type checking and lint configuration.
+        - Incorrect test markers or warning filters.
+        - Configuration that hides real test failures.
+        - Reproducibility of test execution.
+
+    # Makefile automation.
+    - path: "Makefile"
+      instructions: |
+        Check:
+        - Correct make test and make lint behavior.
+        - Target dependencies and execution order.
+        - Failure propagation from test commands.
+        - Environment variable export.
+        - Working directory assumptions.
+        - Correct argument forwarding.
+        - Safe setup and teardown commands.
+        - Idempotency of preparation tasks.
+
+        Do not suggest recreating existing commands.
+
+    # CI workflows.
+    - path: ".github/workflows/**"
+      instructions: |
+        Check integration test pipeline reliability.
+
+        Verify:
+        - Test command failures fail the CI job.
+        - Required services are available before tests.
+        - Service readiness is checked correctly.
+        - Test environment variables are propagated.
+        - Secrets are not exposed in logs.
+        - Artifacts and logs are collected on failures.
+        - Test results are reported accurately.
+        - Parallel jobs do not share mutable resources
+          without isolation.
+        - Dependency versions are reproducible.
+        - Test skips and xfail markers are justified.
+
+        Do not recommend arbitrary sleeps to fix
+        infrastructure timing problems.
+
+    # Shell scripts.
+    - path: "**/*.sh"
+      instructions: |
+        Check:
+        - Proper error and exit code handling.
+        - Correct shell quoting.
+        - Safe handling of external inputs.
+        - Cleanup on interruption or failure.
+        - Environment variable propagation.
+        - Deterministic execution.
+        - Secret leakage through logs or arguments.
+        - Unsafe modification of shared test resources.
+
+        Do not blindly require set -e everywhere.
+        Evaluate the actual error handling.
