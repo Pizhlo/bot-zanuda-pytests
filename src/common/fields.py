@@ -49,8 +49,8 @@ INCLUDE_REASONS_FIELD = "include_reasons"
 CONSISTENCY_FIELD = "consistency"
 SPACE_TYPE_FIELD = "space_type"
 FIELD_MASK_FIELD = "field_mask"
-TITLE_FIELD = "title"
 DECISION_ID_FIELD = "decision_id"
+TITLE_FIELD = "title"
 
 # UPDATE RESOURCE FIELDS
 NOTES_SERVICE_NAME = "notes-service"

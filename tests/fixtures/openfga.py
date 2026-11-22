@@ -45,6 +45,14 @@ def remove_resource_relations(client: httpx.Client, object_ref: str) -> None:
     У временных объектов небольшое число связей. Неожиданную пагинацию считаем ошибкой,
     чтобы не выдавать частичную очистку за успешную. Базовые SQL/модель не меняются.
     """
+    keys = resource_tuple_keys(client, object_ref)
+    if keys:
+        response = client.post("write", json={"deletes": {"tuple_keys": keys}})
+        response.raise_for_status()
+
+
+def resource_tuple_keys(client: httpx.Client, object_ref: str) -> list[dict[str, str]]:
+    """Читает весь набор связей небольшого тестового объекта с повышенной согласованностью."""
     response = client.post(
         "read",
         json={
@@ -57,7 +65,4 @@ def remove_resource_relations(client: httpx.Client, object_ref: str) -> None:
     assert not payload.get("continuation_token"), (
         "Unexpected pagination for a test resource"
     )
-    keys = [entry["key"] for entry in payload["tuples"]]
-    if keys:
-        response = client.post("write", json={"deletes": {"tuple_keys": keys}})
-        response.raise_for_status()
+    return [entry["key"] for entry in payload["tuples"]]

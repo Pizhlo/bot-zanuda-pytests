@@ -11,6 +11,7 @@ on:
       - 'assertions/auth_service.py'
       - 'assertions/decisions.py'
       - 'assertions/decision_fields.py'
+      - 'assertions/record_decisions.py'
       - 'assertions/__init__.py'
       - 'parameters/__init__.py'
       - 'tests/fixtures/**'
