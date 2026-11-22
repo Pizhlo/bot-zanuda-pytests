@@ -1,4 +1,4 @@
-"""Бизнес-правила для заметок во всех ролях и типах пространства."""
+"""Общие действия над заметками и напоминаниями во всех ролях и типах пространства."""
 
 from uuid import uuid4
 
@@ -14,23 +14,27 @@ from src.models.space import SpaceType
 from tests.fixtures.decision_records import Records
 from tests.fixtures.decisions import DecisionClient
 
-pytestmark = pytest.mark.parametrize(
-    "records", [fields.ResourceType.NOTE], indirect=True, scope="module"
+record_kinds = pytest.mark.parametrize(
+    "records",
+    [fields.ResourceType.NOTE, fields.ResourceType.REMINDER],
+    indirect=True,
+    scope="module",
 )
 
 
+@record_kinds
 @pytest.mark.parametrize("case", cases.RECORD_ACCESS_CASES, ids=str)
-def test_note_access(
+def test_record_access(
     case: cases.RecordCase,
     actors: dict[Role, Actor],
     records: Records,
     decisions: DecisionClient,
 ) -> None:
-    """Проверяет права на чтение, обновление и удаление заметки с учётом роли и авторства.
+    """Проверяет права на чтение, обновление и удаление заметки или напоминания с учётом роли и авторства.
 
     В общем пространстве учитываются авторство и роль, в личном доступ имеет только владелец.
     Решение определяется сохранёнными связями, даже если запрос указывает другое пространство.
-    Для неизвестной записи или записи без определённого родительского типа ожидается отказ.
+    При двух родителях доступ возможен только для их общего владельца.
     """
     actor = actors[case.actor]
     body = records.request(case, actor)
@@ -38,8 +42,9 @@ def test_note_access(
     assert_record_access(response, body, case)
 
 
+@record_kinds
 @pytest.mark.parametrize(("parent", "role", "allowed"), cases.RECORD_CREATION_CASES)
-def test_create_note(  # noqa: WPS211 — родители, роли и фикстуры API
+def test_create_record(  # noqa: WPS211 — родители, роли и фикстуры API
     parent: str,
     allowed: bool,
     role: Role,
@@ -47,7 +52,7 @@ def test_create_note(  # noqa: WPS211 — родители, роли и фикс
     records: Records,
     decisions: DecisionClient,
 ) -> None:
-    """Проверяет, кто может создать заметку в указанном родительском пространстве.
+    """Проверяет, кто может создать заметку или напоминание в указанном родительском пространстве.
 
     В общем пространстве это разрешено владельцу, администратору и редактору, в личном только владельцу.
     Неизвестный родитель или неоднозначный тип дают отказ. Объяснение указывает проверенное пространство.
@@ -74,20 +79,24 @@ def test_create_note(  # noqa: WPS211 — родители, роли и фикс
     assert f"space:{parent_id}" in response.json()["reasons"][0]["message"]
 
 
-@pytest.mark.parametrize(("mask", "forbidden"), cases.RECORD_FIELD_CASES)
-def test_note_field_policy(
+@pytest.mark.parametrize(
+    ("records", "mask", "forbidden"), cases.RECORD_FIELD_CASES, indirect=["records"]
+)
+@pytest.mark.parametrize("role", (Role.OWNER, Role.ADMIN, Role.EDITOR))
+def test_record_field_policy(  # noqa: WPS211 — роль, маска и фикстуры
+    role: Role,
     mask: list[str],
     forbidden: list[str],
     actors: dict[Role, Actor],
     records: Records,
     decisions: DecisionClient,
 ) -> None:
-    """Проверяет, какие поля заметки разрешено обновить пользователю с правом редактирования.
+    """Проверяет маску обновления заметки или напоминания для пользователя с правом редактирования.
 
-    Повтор редактируемого поля допустим. Служебное или неизвестное поле приводит к отказу для всей маски.
-    В объяснении каждое запрещённое поле перечисляется один раз.
+    Разрешены заголовок и редактируемое поле данного типа записи. Служебное, неизвестное или чужое
+    для этого типа поле приводит к отказу для всей маски. Объяснение перечисляет поля без повторов.
     """
-    actor = actors[Role.OWNER]
+    actor = actors[role]
     body = decision_request(
         actor,
         fields.Operation.UPDATE,

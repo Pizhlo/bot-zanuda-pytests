@@ -5,6 +5,7 @@ import pytest
 from src.models.decision import DecisionReasonCode, Role
 
 READ = "read"
+STOP = "stop"
 
 
 REPEATED_READ_CASES = (

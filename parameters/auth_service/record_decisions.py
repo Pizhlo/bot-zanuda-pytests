@@ -18,9 +18,18 @@ SHARED_RIGHTS = MappingProxyType(
             decision_params.READ,
             fields.Operation.UPDATE,
             fields.Operation.DELETE,
+            decision_params.STOP,
         ),
-        Role.ADMIN: (decision_params.READ, fields.Operation.UPDATE),
-        Role.EDITOR: (decision_params.READ, fields.Operation.UPDATE),
+        Role.ADMIN: (
+            decision_params.READ,
+            fields.Operation.UPDATE,
+            decision_params.STOP,
+        ),
+        Role.EDITOR: (
+            decision_params.READ,
+            fields.Operation.UPDATE,
+            decision_params.STOP,
+        ),
         Role.VIEWER: (decision_params.READ,),
         Role.OUTSIDER: (),
     }
@@ -74,6 +83,34 @@ def damaged_parent_cases(actions: tuple[str, ...]) -> Iterator[RecordCase]:
                 # через вторую связь. Здесь оба пространства принадлежат одному владельцу.
                 allowed = space == "two_parents" and actor == Role.OWNER
                 yield RecordCase(space, actor, Role.VIEWER, action, allowed)
+    for action in actions:
+        yield RecordCase("different_owners", Role.OWNER, Role.VIEWER, action, False)
+
+
+type FieldCase = tuple[str, list[str], list[str]]
+
+
+def field_cases(kind: str, editable: str, other_kind_field: str) -> list[FieldCase]:
+    """Формирует маски для проверки редактируемых, технических и неизвестных полей.
+    Третье значение каждого случая перечисляет поля, из-за которых следует отклонить всю маску.
+    """
+    return [
+        (kind, [editable], []),
+        (kind, [fields.TITLE_FIELD], []),
+        (kind, [fields.TITLE_FIELD, editable, fields.TITLE_FIELD], []),
+        (kind, [other_kind_field], [other_kind_field]),
+        (kind, ["created"], ["created"]),
+        (
+            kind,
+            [
+                "last_edit",
+                fields.TITLE_FIELD,
+                "unknown",
+                "last_edit",
+            ],
+            ["last_edit", "unknown"],
+        ),
+    ]
 
 
 CREATORS: MappingProxyType[str, tuple[Role, ...]] = MappingProxyType(
@@ -86,7 +123,8 @@ ACTIONS = (decision_params.READ, fields.Operation.UPDATE, fields.Operation.DELET
 
 
 RECORD_ACCESS_CASES = (*record_cases(ACTIONS), *damaged_parent_cases(ACTIONS))
-"""Чтение, обновление и удаление заметки. В запросе передан другой space_id, права определяет сохранённый родитель.
+"""Чтение, обновление и удаление заметки или напоминания. В запросе передан другой space_id, права определяет
+сохранённый родитель.
 
 - Автор работает со своей записью в общем пространстве, даже без членства: 200 OK, allow для всех трёх действий.
 - Владелец общего пространства работает с чужой записью: 200 OK, allow для всех трёх действий.
@@ -96,6 +134,7 @@ RECORD_ACCESS_CASES = (*record_cases(ACTIONS), *damaged_parent_cases(ACTIONS))
 - Владелец личного пространства обращается к записи любого автора: 200 OK, allow для всех трёх действий.
 - Другой пользователь обращается к записи личного пространства, даже собственной: 200 OK, deny.
 - Запись неизвестна, лишена родителя, у родителя нет типа или указаны оба типа: 200 OK, deny при любой роли.
+- Владелец shared обращается к записи с дополнительным родителем personal другого владельца: 200 OK, deny.
 - У записи два родителя (shared и personal) с одним владельцем: 200 OK, allow у этого владельца.
 - Та же запись с двумя родителями, запрос от любого другого пользователя: 200 OK, deny.
 """
@@ -112,7 +151,7 @@ RECORD_CREATION_CASES = tuple(
     )
     for role in Role
 )
-"""Проверка права создать заметку. В объяснении решения сверяем UUID родительского пространства.
+"""Проверка права создать заметку или напоминание. В объяснении решения сверяем UUID родительского пространства.
 
 - Общее пространство, инициатор owner, admin или editor: 200 OK, allow.
 - Общее пространство, инициатор viewer или посторонний: 200 OK, deny.
@@ -123,29 +162,38 @@ RECORD_CREATION_CASES = tuple(
 """
 
 
-type FieldCase = tuple[list[str], list[str]]
-
-RECORD_FIELD_CASES: tuple[FieldCase, ...] = (
-    (["text"], []),
-    ([fields.TITLE_FIELD], []),
-    ([fields.TITLE_FIELD, "text", fields.TITLE_FIELD], []),
-    (["remind_at"], ["remind_at"]),
-    (["created"], ["created"]),
-    (
-        [
-            "last_edit",
-            fields.TITLE_FIELD,
-            "unknown",
-            "last_edit",
-        ],
-        ["last_edit", "unknown"],
+RECORD_FIELD_CASES = (
+    *(
+        (fields.ResourceType.NOTE, [field], [field])
+        for field in ("timestamp", "id", "user_id", fields.SPACE_ID_FIELD)
     ),
+    *field_cases(fields.ResourceType.NOTE, "text", "remind_at"),
+    *field_cases(fields.ResourceType.REMINDER, "remind_at", "text"),
 )
-"""Владелец обновляет собственную заметку в общем пространстве.
+"""Пользователь с правом update обновляет заметку или напоминание в общем пространстве.
 
-- В маске только text или только title: 200 OK, allow.
-- В маске title, text и повтор title: 200 OK, allow, каждое поле перечислено один раз.
-- Запрошено поле напоминания remind_at: 200 OK, deny, указано remind_at.
-- Запрошено техническое поле created: 200 OK, deny, указано created.
+- Запрошено одно поле (title либо text у заметки, title либо remind_at у напоминания): 200 OK, allow.
+- Запрошены оба редактируемых поля, title повторяется: 200 OK, allow, в объяснении каждое поле указано один раз.
+- У заметки запрошено remind_at или у напоминания text: 200 OK, deny, указано поле другого типа записи.
+- Для заметки timestamp, id, user_id и space_id запрещены владельцу, администратору и редактору: 200 OK, deny.
+- В маске только техническое поле created: 200 OK, deny, указано created.
 - Вместе с title запрошены last_edit дважды и unknown: 200 OK, deny для всей маски, указаны last_edit и unknown.
+"""
+
+
+STOP_REMINDER_CASES = (
+    *record_cases((decision_params.STOP,)),
+    *damaged_parent_cases((decision_params.STOP,)),
+)
+"""Остановка напоминания без field_mask. Проверяется сохранённый родитель, даже если запрос указывает другой.
+
+- Автор останавливает своё напоминание в общем пространстве, даже без членства: 200 OK, allow.
+- Владелец, администратор или редактор останавливает чужое напоминание в общем пространстве: 200 OK, allow.
+- Зритель или посторонний останавливает чужое напоминание в общем пространстве: 200 OK, deny.
+- Владелец личного пространства останавливает напоминание любого автора: 200 OK, allow.
+- Другой пользователь останавливает напоминание в личном пространстве, даже своё: 200 OK, deny.
+- Запись неизвестна, лишена родителя, у родителя нет типа или указаны оба типа: 200 OK, deny при любой роли.
+- Владелец shared обращается к записи с дополнительным родителем personal другого владельца: 200 OK, deny.
+- У записи два родителя (shared и personal) с одним владельцем: 200 OK, allow у этого владельца.
+- Та же запись с двумя родителями, запрос от любого другого пользователя: 200 OK, deny.
 """
