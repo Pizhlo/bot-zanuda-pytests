@@ -15,4 +15,6 @@ pytest_plugins = [
     "tests.fixtures.decision_records",
     "tests.fixtures.stored_note",
     "tests.fixtures.decision_members",
+    "tests.fixtures.decision_spaces",
+    "tests.fixtures.space_privacy",
 ]
