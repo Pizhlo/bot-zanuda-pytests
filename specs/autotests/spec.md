@@ -254,3 +254,5 @@ A successful synchronization returns the resource with its attributes (null when
 ### Single-action decisions
 
 Exercise POST /api/v0/decisions/check as a registered bot user against the pinned authorization model and field policy. Check the HTTP outcome, stable reason codes and the requested identity, action and resource. Repeating a request ID creates a new decision, including for a denial. Persisted reasons are independent of whether the HTTP client requested them. A mismatched subject returns 403 and creates no decision. Fixtures own their SQL identities, decision request IDs and graph objects, including cleanup after a failed assertion.
+
+Space decisions cover create, read, rename and delete for every role. Only the verified owner may rename either kind or delete a shared space. A personal space cannot be deleted. Missing, contradictory or unknown space types grant no access. All registered users can create shared spaces; personal creation checks the user's existing personal-space marker.

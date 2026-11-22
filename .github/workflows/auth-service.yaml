@@ -10,6 +10,7 @@ on:
       - 'parameters/auth_service/**'
       - 'assertions/auth_service.py'
       - 'assertions/decisions.py'
+      - 'assertions/decision_fields.py'
       - 'assertions/__init__.py'
       - 'parameters/__init__.py'
       - 'tests/fixtures/**'

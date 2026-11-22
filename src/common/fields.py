@@ -48,6 +48,8 @@ OPTIONS_FIELD = "options"
 INCLUDE_REASONS_FIELD = "include_reasons"
 CONSISTENCY_FIELD = "consistency"
 SPACE_TYPE_FIELD = "space_type"
+FIELD_MASK_FIELD = "field_mask"
+TITLE_FIELD = "title"
 DECISION_ID_FIELD = "decision_id"
 
 # UPDATE RESOURCE FIELDS

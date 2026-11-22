@@ -7,9 +7,9 @@ pytest_plugins = [
     "tests.fixtures.webserver",
     "tests.fixtures.rabbitmq",
     "tests.fixtures.auth_service",
-    "tests.fixtures.decision_actors",
-    "tests.fixtures.decisions",
     "tests.fixtures.vault",
     "tests.fixtures.postgres",
     "tests.fixtures.openfga",
+    "tests.fixtures.decision_actors",
+    "tests.fixtures.decisions",
 ]
