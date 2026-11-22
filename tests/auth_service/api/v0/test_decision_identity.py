@@ -17,11 +17,14 @@ from src.storages.postgres_client import PostgresClient
 from tests.fixtures import decisions as clients
 from tests.fixtures import owner_request as owners
 from tests.fixtures import rabbitmq
+from tests.fixtures.service_log import ServiceLog
 
 
 @pytest.mark.parametrize("case", cases.TOKEN_CASES)
-def test_decision_service_token(
+def test_decision_service_token(  # noqa: WPS211 — токен, HTTP, аудит, журнал и фактическое отсутствие записи
     case: cases.TokenCase,
+    service_log: ServiceLog | None,
+    postgres_client: PostgresClient,
     scoped_token: Callable[[cases.TokenCase], str],
     owner_request: owners.OwnerRequest,
     decisions: clients.DecisionClient,
@@ -31,7 +34,7 @@ def test_decision_service_token(
 
     Некорректный или просроченный токен даёт 401 Unauthorized. Для действующего токена необходима выданная
     привилегия bot. Похожее имя привилегии и наличие невыданной привилегии приводят к 403 Forbidden.
-    Каждый отказ попадает в аудит.
+    Каждый отказ попадает в аудит. По просроченному токену решение также не сохраняется.
     """
     actor, body = owner_request
     header = clients.new_request_header_id(decisions.request_ids)
@@ -49,6 +52,13 @@ def test_decision_service_token(
             == response.headers["X-Request-ID"]
             == header
         )
+        if case.mode == "expired":
+            if service_log is not None:
+                service_log.assert_warning(header)
+            assert not postgres_client.fetch_all(
+                "SELECT 1 FROM auth.decisions WHERE request_id IN (%s,%s)",
+                (header, body[fields.REQUEST_ID_FIELD]),
+            )
         with auth_service_error_messages_from_rabbitmq as raw:
             assert_failed_decision(
                 raw, response, header, code=case.code, stage="authenticate"

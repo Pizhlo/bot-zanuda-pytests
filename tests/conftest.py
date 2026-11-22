@@ -7,6 +7,7 @@ pytest_plugins = [
     "tests.fixtures.webserver",
     "tests.fixtures.rabbitmq",
     "tests.fixtures.auth_service",
+    "tests.fixtures.service_log",
     "tests.fixtures.vault",
     "tests.fixtures.postgres",
     "tests.fixtures.openfga",

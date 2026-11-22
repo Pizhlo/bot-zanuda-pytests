@@ -1,6 +1,5 @@
 """Корреляция раннего отказа и сверка заявленной личности."""
 
-from contextlib import AbstractContextManager
 from uuid import UUID, uuid4
 
 import httpx
@@ -14,6 +13,7 @@ from src.common import fields
 from src.models.decision import Actor, Role, decision_request
 from tests.fixtures.decisions import DecisionClient
 from tests.fixtures.rabbitmq import QueueMessage
+from tests.fixtures.service_log import ServiceLog
 
 HEADER = "X-Request-ID"
 
@@ -37,12 +37,13 @@ def assert_rejection_id(
 
 
 @pytest.mark.parametrize("case", cases.UNAUTHORIZED_CASES)
-def test_unauthorized_correlation(
+def test_unauthorized_correlation(  # noqa: WPS211 — HTTP, аудит и корреляция отказа
     case: cases.Rejection,
+    service_log: ServiceLog | None,
     actors: dict[Role, Actor],
     auth_service_v0_api_client: AuthServiceV0APIClient,
     decision_request_ids: set[UUID],
-    auth_service_error_messages_from_rabbitmq: AbstractContextManager[bytes | None],
+    auth_service_error_messages_from_rabbitmq: QueueMessage,
 ) -> None:
     """Проверяет, как сервис связывает ранний отказ в аутентификации с событием RabbitMQ.
 
@@ -67,6 +68,8 @@ def test_unauthorized_correlation(
     correlation = assert_rejection_id(
         response, body[fields.REQUEST_ID_FIELD], case.header, case.valid_header
     )
+    if service_log is not None:
+        service_log.assert_warning(correlation)
     with auth_service_error_messages_from_rabbitmq as message:
         assert_failed_decision(
             message, response, correlation, code="unauthorized", stage="authenticate"

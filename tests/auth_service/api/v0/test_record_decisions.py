@@ -4,8 +4,8 @@ from uuid import uuid4
 
 import pytest
 
-from assertions.decisions import assert_decision
 from assertions.decision_fields import assert_mask
+from assertions.decisions import assert_decision
 from assertions.record_decisions import assert_record_access
 from parameters.auth_service import record_decisions as cases
 from src.common import fields

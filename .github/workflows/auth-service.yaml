@@ -7,11 +7,17 @@ on:
     # При новой общей зависимости добавьте её сюда. Документация и tests/webserver не входят.
     paths: &auth_service_paths
       - 'tests/auth_service/**'
+      - 'tests/auth_operations/**'
+      - 'tools/run_all.sh'
       - 'parameters/auth_service/**'
       - 'assertions/auth_service.py'
       - 'assertions/decisions.py'
       - 'assertions/decision_fields.py'
       - 'assertions/record_decisions.py'
+      - 'assertions/space_sync.py'
+      - 'assertions/decision_log.py'
+      - 'assertions/decision_failures.py'
+      - 'assertions/audit_delivery.py'
       - 'assertions/__init__.py'
       - 'parameters/__init__.py'
       - 'tests/fixtures/**'
@@ -99,23 +105,37 @@ jobs:
               --build-arg BUILD_DATE="$(git show -s --format=%cI)" .
             image_id=$(docker image inspect --format '{{.Id}}' "auth-under-test:$revision")
           fi
-          echo "AUTH_REF=$revision" >> "$GITHUB_ENV"
           echo "AUTH_IMAGE=$image_id" >> "$GITHUB_ENV"
       - name: Установить зависимость скрипта запуска
         run: sudo apt-get update && sudo apt-get install -y python3-yaml
-      - name: Выполнить полный прогон тестов auth-service
-        run: make integration-run
+      - name: Проверить внешние контракты auth-service и отказы зависимостей
+        shell: bash
+        run: |
+          mkdir -p ".logs/$RUN_ID"
+          make integration-run 2>&1 | tee ".logs/$RUN_ID/integration.log"
       # Дополнительная диагностика, если общий runner завершился раньше подготовки/уборки.
       - name: Собрать оставшиеся логи
         if: always()
+        shell: bash
         run: |
           if [ -f testkit/Makefile ]; then
-            make integration-logs
+            mkdir -p ".logs/$RUN_ID"
+            make integration-logs 2>&1 | tee -a ".logs/$RUN_ID/integration.log"
           fi
       # Отдельный always-шаг выполняется даже при ошибке сбора логов.
       - name: Удалить оставшееся окружение
         if: always()
+        shell: bash
         run: |
           if [ -f testkit/Makefile ]; then
-            make integration-down
+            mkdir -p ".logs/$RUN_ID"
+            make integration-down 2>&1 | tee -a ".logs/$RUN_ID/integration.log"
           fi
+      - name: Сохранить диагностику сценариев со сбоями
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: auth-operations-logs
+          path: .logs/${{ env.RUN_ID }}/*.log
+          include-hidden-files: true
+          if-no-files-found: ignore

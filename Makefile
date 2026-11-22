@@ -21,9 +21,9 @@ test:
 
 .PHONY: install lint fix test
 
-# Запустить только tests/auth_service с выводом pytest без файлов отчётов.
+# Выполнить основной набор и подключённые testkit сценарии отказов в одной сессии pytest.
 test-auth-service:
-	uv run --frozen python -m pytest -p no:cacheprovider -o 'addopts=--strict-markers --strict-config --verbose --tb=short' tests/auth_service
+	uv run --frozen python -m pytest -p no:cacheprovider -o 'addopts=--strict-markers --strict-config --verbose --tb=short' tests/auth_service $(if $(AUTH_SERVICE_LOG),tests/auth_operations)
 
 .PHONY: test-auth-service
 
@@ -57,6 +57,7 @@ TESTKIT_DIR ?= $(CURDIR)/testkit
 
 export INTEGRATION_ROOT := $(CURDIR)
 export PYTESTS_DIR := $(CURDIR)
+export TESTKIT_AUTH_OBSERVABILITY ?= true
 export INTEGRATION_CONTEXT := pytests
 export PYTEST_CONFIG SEED_DATA TESTDATA_PATH TESTDATA_DATABASE_URL
 
@@ -76,11 +77,7 @@ export PYTEST_CONFIG SEED_DATA TESTDATA_PATH TESTDATA_DATABASE_URL
 
 .PHONY: integration-up integration-run integration-seed integration-test integration-down integration-logs integration-rabbitmq-setup
 
-# $@ — запрошенная цель; -C выбирает каталог testkit и его Makefile.
-# Например: make integration-seed → make -C ./testkit integration-seed
-# → python3 scripts/integration.py seed (реализация находится в testkit).
-# @ скрывает только саму команду make, вывод Python/pytest остаётся виден.
-integration-up integration-run integration-seed integration-test integration-down integration-logs integration-rabbitmq-setup:
+integration-up integration-test integration-run integration-seed integration-down integration-logs integration-rabbitmq-setup:
 	@$(MAKE) -C "$(TESTKIT_DIR)" $@
 
 .PHONY: test-data-auth-service-up
@@ -104,4 +101,5 @@ test-webserver:
 test-data-webserver-up:
 	uv run --frozen python -m tools.seed_webserver
 
-export INTEGRATION_SERVICE WEBSERVER_MODE WEBSERVER_IMAGE
+export INTEGRATION_SERVICE WEBSERVER_MODE WEBSERVER_IMAGE AUTH_MODE TEST_MODE AUTH_IMAGE AUTOTESTS_IMAGE RUN_ID
+export COMPOSE_PROJECT_NAME AUTOTESTS_TAG READY_TIMEOUT TESTKIT_STATE_DIR TESTKIT_SUBNET_POOL AUTH_FGA_MODEL_FILE CI

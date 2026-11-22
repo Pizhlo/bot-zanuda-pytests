@@ -274,3 +274,32 @@ After successful personal-space synchronization, a second create decision for th
 Only POST /api/v0/decisions/check SHALL require the exact canonical JSON field names at every object level. Reject a noncanonical spelling, a repeated field or a case collision even when the values agree. Before authorization or persistence, return HTTP 400 `invalid_request`, emit a correlated failed `check_decision` event at `decode_request` and create no decision row. A uniquely supplied canonical, valid request_id identifies that error. If request_id itself is repeated or ambiguous, no body ID is trusted: omit it from the error JSON and use the HTTP request correlation ID in the response header and audit.
 
 Reject unsupported action/resource pairs and action-specific attributes with a field-level 400. Relational denial takes precedence over field restrictions. Check both consistency options and the public reasons switch. An early token rejection uses a valid X-Request-ID across the response and audit; otherwise a generated ID appears in the response header and event, with the rejected body unread.
+
+
+Completed RabbitMQ deliveries for both allow and deny SHALL match the HTTP result, request ID and decision ID.
+The completed audit of first personal space creation SHALL name the personal type and the subject's
+`has_personal_space` check. Member audit SHALL include `target_is_owner` only after the secondary check
+returned a boolean. A denied primary relation skips that check.
+
+#### Dependency failures during a decision check
+
+For each valid request below, make one dependency unavailable after the service is ready.
+`POST /api/v0/decisions/check` SHALL return HTTP 503 with exactly `error_code`, `message`
+and the submitted `request_id` in the JSON body. The `X-Request-ID` response header SHALL
+match that ID. PostgreSQL SHALL contain no decision row for that request.
+
+| Operation and failure | HTTP and audit `error_code` | HTTP and audit `message` | Audit stage |
+| --- | --- | --- | --- |
+| Renaming a shared space as its owner fails during trusted identity lookup. | `identity_store_unavailable` | `Identity store is unavailable` | `verify_subject` |
+| Renaming a shared space as its owner fails during the OpenFGA permission check. | `openfga_unavailable` | `Relationship check is unavailable` | `check_relation` |
+| Creating a shared space fails when OpenFGA cannot return the pinned model. | `openfga_unavailable` | `Relationship check is unavailable` | `check_relation` |
+| Creating a personal space fails when OpenFGA cannot check the user's `has_personal_space` relation. | `openfga_unavailable` | `Relationship check is unavailable` | `check_relation` |
+| A nonmember requests a shared-space rename. PostgreSQL rejects the insert after the service computes `deny`. | `decision_store_unavailable` | `Decision store is unavailable` | `save_decision` |
+| The owner requests a shared-space rename. PostgreSQL rejects the insert after the service computes `allow`. | `decision_store_unavailable` | `Decision store is unavailable` | `save_decision` |
+
+With RabbitMQ available, each attempt SHALL deliver one terminal `check_decision` event
+with status `failed`, the same request ID, error code and message, and the stage listed above.
+Identity and OpenFGA failures SHALL omit `decision_id` and `decision` from the event context.
+For both insert failures, the event context SHALL retain the computed `allow` or `deny`,
+a nonzero `decision_id`, the pinned `authorization_model_id` and the active `policy_version`.
+The service's component tests cover failures within the embedded field policy.
