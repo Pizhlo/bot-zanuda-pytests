@@ -5,6 +5,10 @@ import pytest
 
 AUTH_SERVICE_NAME = "auth-service"
 
+STAGE_FIELD = "stage"
+AUTHENTICATE = "authenticate"
+TOKEN_VERIFICATION_FAILED = "Token verification failed"
+
 # агент для тестов
 TEST_USER_AGENT = "python-httpx/0.28.1"
 

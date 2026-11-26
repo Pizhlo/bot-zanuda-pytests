@@ -1,6 +1,5 @@
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from functools import partial
-from typing import Any
 import pytest
 import httpx
 from src.api_clients.auth_service import AuthServiceAPIClient, AuthServiceV0APIClient
@@ -26,8 +25,11 @@ def jwt_token_factory() -> Callable[..., str]:
 
 
 @pytest.fixture(scope="session")
-def auth_service_v0_api_client() -> AuthServiceV0APIClient:
-    return AuthServiceV0APIClient()
+def auth_service_v0_api_client() -> Iterator[AuthServiceV0APIClient]:
+    """Предоставляет общий HTTP-клиент и закрывает пул соединений после сессии."""
+    api = AuthServiceV0APIClient()
+    with api.client:
+        yield api
 
 
 @pytest.fixture(scope="session")
@@ -35,14 +37,18 @@ def auth_service_api_client() -> AuthServiceAPIClient:
     return AuthServiceAPIClient()
 
 @pytest.fixture(scope="session")
-def login() -> Any:
-    response = AuthServiceV0APIClient().login(dict[str, str](
-        grant_type="client_credentials",
-        client_id="bot",
-        client_secret="super-strong-secret",
-        scope="bot",
-    ))
-
-    assert response.status_code == httpx.codes.OK, response.text
-    
-    return response.json()["access_token"]
+def login(
+    auth_service_v0_api_client: AuthServiceV0APIClient,
+    get_client_secret: Callable[[str], str],
+) -> str:
+    """Получает токен тестового бота по секрету из Vault."""
+    response = auth_service_v0_api_client.login({
+        "grant_type": "client_credentials",
+        "client_id": "bot",
+        "client_secret": get_client_secret("bot"),
+        "scope": "bot",
+    })
+    assert response.status_code == httpx.codes.OK
+    token = response.json()["access_token"]
+    assert isinstance(token, str) and token
+    return token

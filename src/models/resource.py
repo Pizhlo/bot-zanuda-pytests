@@ -1,4 +1,4 @@
-import copy
+import re
 
 from dataclasses import dataclass, fields as dataclass_fields, is_dataclass
 from enum import Enum
@@ -6,6 +6,7 @@ from typing import Any
 
 
 REF_SEPARATOR = ":"
+META_KEY = "meta"
 
 
 def format_ref(resource_type: str, resource_id: str) -> str:
@@ -19,6 +20,13 @@ class ResourceRef:
 
     type: str
     id: str
+
+
+@dataclass(frozen=True)
+class ResourceWithAttributes(ResourceRef):
+    """Ресурс для создания пространства и успешного ответа синхронизации."""
+
+    attributes: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -148,27 +156,26 @@ def to_api_dict(dataclass_instance: Any) -> dict[str, Any]:
     return serialized
 
 
-def _without_auth_model_id(payload: dict[str, Any]) -> dict[str, Any]:
-    """Удаляет auth_model_id из payload."""
-    copy_result = copy.deepcopy(payload)
-    meta = copy_result.get("meta")
-    if isinstance(meta, dict):
-        meta.pop("auth_model_id", None)
-        if not meta:
-            copy_result.pop("meta", None)
-    return copy_result
-
-
 def assert_api_response(
     actual: dict[str, Any],
     expected: ResourceChangeResponse | ResourceChangeErrorResponse,
 ) -> None:
-    """Сравнивает ответ API с ожидаемым dataclass, игнорируя meta.auth_model_id."""
-    actual_normalized = _without_auth_model_id(actual)
-    expected_normalized = _without_auth_model_id(to_api_dict(expected))
-    assert actual_normalized == expected_normalized, (
-        f"API response mismatch:\nactual={actual_normalized}\nexpected={expected_normalized}"
-    )
-
+    """Сверяет весь ответ. ID применённой модели динамический и должен быть ULID."""
+    expected_body = to_api_dict(expected)
+    model_id = actual[META_KEY]["auth_model_id"]
+    if isinstance(expected, ResourceChangeResponse):
+        assert isinstance(model_id, str) and re.fullmatch(r"[0-7][0-9A-HJKMNP-TV-Z]{25}", model_id)
+        empty_resource = {"id": "00000000-0000-0000-0000-000000000000", "type": "", "attributes": None}
+        expected_body[META_KEY].update({
+            "subject": {**empty_resource, "relation": ""},
+            "resource": empty_resource,
+            "action": {"name": "", "attributes": None},
+            "context": {"source_service": "", "event_type": "", "trace_id": ""},
+        })
+    else:
+        assert isinstance(model_id, str)
+        assert not model_id or re.fullmatch(r"[0-7][0-9A-HJKMNP-TV-Z]{25}", model_id)
     if expected.meta.auth_model_id is not None:
-        assert actual.get("meta", {}).get("auth_model_id") == expected.meta.auth_model_id
+        assert model_id == expected.meta.auth_model_id
+    expected_body[META_KEY]["auth_model_id"] = model_id
+    assert actual == expected_body

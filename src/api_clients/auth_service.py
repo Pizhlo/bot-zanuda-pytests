@@ -68,3 +68,28 @@ class AuthServiceV0APIClient(AuthServiceAPIClient):
             kwargs[HEADERS_KEY][X_TELEGRAM_USER_ID_KEY] = x_telegram_user_id
 
         return self.client.post("/api/v0/resources/update", **kwargs)
+
+    def check_decision(
+        self,
+        token: str | None,
+        telegram_id: str | None,
+        body: dict[str, Any] | bytes,
+        *,
+        request_header_id: str | None = None,
+    ) -> Response:
+        """Проверяет одно действие от имени доверенного пользователя."""
+        headers = {"Content-Type": "application/json"}
+        if telegram_id is not None:
+            headers[X_TELEGRAM_USER_ID_KEY] = telegram_id
+        if token is not None:
+            headers[AUTHORIZATION_KEY] = f"Bearer {token}"
+        if request_header_id is not None:
+            headers["X-Request-ID"] = request_header_id
+        path = "/api/v0/decisions/check"
+        if isinstance(body, bytes):
+            return self.client.post(path, headers=headers, content=body)
+        return self.client.post(
+            path,
+            headers=headers,
+            json=body,
+        )

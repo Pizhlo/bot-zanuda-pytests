@@ -50,17 +50,40 @@ class WebserverMessagesTest(unittest.TestCase):
         channel.close.assert_called_once()
 
     def test_timeout_and_invalid_body(self) -> None:
-        """Пустая очередь имеет ограниченное число опросов с паузами."""
+        """Проверяет, что фикстура возвращает None, если из очереди не удалось прочитать байтовое сообщение.
+
+        При пустой очереди фикстура делает две попытки с паузами. Если брокер прислал строку, она также возвращает None.
+        """
         broker = self.broker()
         channel = broker.connection.channel.return_value
         channel.basic_get.return_value = (None, None, None)
-        with patch.object(rabbitmq.time, "sleep") as sleep:
+        with (
+            patch.object(rabbitmq.time, "monotonic", return_value=100),
+            patch.object(rabbitmq.time, "sleep") as sleep,
+        ):
             with rabbitmq._note_message(broker) as body:
                 self.assertIsNone(body)
             self.assertEqual(sleep.call_count, 2)
         channel.basic_get.return_value = (MagicMock(delivery_tag=1), None, "not bytes")
         with rabbitmq._note_message(broker) as body:
             self.assertIsNone(body)
+
+    def test_polling_stops_at_deadline(self) -> None:
+        """Проверяет, что после истечения срока ожидания фикстура прекращает опрашивать пустую очередь.
+
+        Если уже первое чтение заняло всё отведённое время, фикстура возвращает None без второй попытки.
+        """
+        broker = self.broker()
+        channel = broker.connection.channel.return_value
+        channel.basic_get.return_value = (None, None, None)
+        # Первое чтение занимает всё время, отведённое для двух попыток.
+        with (
+            patch.object(rabbitmq.time, "monotonic", side_effect=[100, 100, 101, 101]),
+            patch.object(rabbitmq.time, "sleep"),
+            rabbitmq._note_message(broker) as body,
+        ):
+            self.assertIsNone(body)
+        channel.basic_get.assert_called_once_with(queue="notes", auto_ack=False)
 
     def test_fixture_purges_before_and_after(self) -> None:
         """Сценарий получает пустую notes-очередь, исключение не отменяет уборку."""
@@ -82,3 +105,26 @@ class WebserverMessagesTest(unittest.TestCase):
                 self.fail("missing connection entered context")
         with self.assertRaisesRegex(RuntimeError, "not established"):
             next(unwrap(rabbitmq.note_messages_from_rabbitmq)(broker))
+
+
+class AuditDeliveryTest(unittest.TestCase):
+    """Проверки повторной публикации события одного запроса."""
+
+    def test_delayed_duplicate_prevents_ack(self) -> None:
+        """Проверяет, что фикстура обнаруживает повторное событие аудита, даже если между доставками очередь была пуста.
+
+        При дубликате проверка завершается ошибкой, а оба сообщения остаются неподтверждёнными.
+        """
+        broker = MagicMock()
+        broker.config.queue_poll_attempts = 2
+        channel = broker.connection.channel.return_value
+        event = (MagicMock(delivery_tag=1), None, b"audit")
+        channel.basic_get.side_effect = [event, (None, None, None), event]
+        with (
+            patch.object(rabbitmq.time, "monotonic", return_value=0),
+            patch.object(rabbitmq.time, "sleep"),
+            self.assertRaisesRegex(AssertionError, "больше одного"),
+        ):
+            with rabbitmq._audit_delivery(broker) as body:
+                self.assertEqual(body, b"audit")
+        channel.basic_ack.assert_not_called()

@@ -189,16 +189,27 @@ TESTDATA_PATH позволяет выбрать другой каталог, TES
 
 ## Образ сервиса в GitHub Actions
 
-Workflow «Тесты» берёт адрес auth-service из Actions secret
-`AUTH_SERVICE_IMAGE_REPOSITORY` этого репозитория. Значение — адрес без тега
-(`[registry/]namespace/repository`); workflow добавляет `:latest`.
-Для ручной проверки другого образа задайте полный адрес в input `auth_image`.
-Если secret отсутствует и override не задан, запуск остановится с пояснением.
+Workflow выбирает ревизию auth-service в таком порядке: ручной параметр `auth_ref`, переменная репозитория `AUTH_SERVICE_REF`, затем ветка `main`. Для совместной разработки BZ-188 и BZ-167 задайте в pytests переменную `AUTH_SERVICE_REF=BZ-167` и удалите её после слияния BZ-167 в `main`. Для воспроизводимого ручного запуска укажите полный SHA в `auth_ref`.
 
-Существующие `DOCKER_USERNAME` и `DOCKER_REPO_NAME` относятся к публикации
-собственного образа pytests и не заменяют адрес образа сервиса.
-Локальный запуск сохраняет прежний default latest и параметр `AUTH_IMAGE`;
-GitHub Secrets для него не нужны.
+После checkout workflow собирает штатный образ из фактического коммита и берёт из него `fga/auth-model.fga`. Чтобы проверить опубликованный образ, укажите `auth_image`. Его OCI-метка `org.opencontainers.image.revision` должна содержать полный SHA выбранного коммита. Workflow проверяет метку до запуска стенда и передаёт testkit ID проверенного образа.
+
+Для локального прогона из каталога pytests подготовьте соседний checkout auth-service на проверяемом коммите. Команды ниже используют одноразовый тег Docker и передают Make ID собранного образа, чтобы testkit запустил эту сборку.
+
+```bash
+(
+set -euo pipefail
+auth_src=$(git -C ../auth-service rev-parse --show-toplevel)
+revision=$(git -C "$auth_src" rev-parse HEAD)
+model_file=$(mktemp --suffix=.fga)
+trap 'rm -f -- "$model_file"' EXIT
+git -C "$auth_src" show "$revision:fga/auth-model.fga" > "$model_file"
+git -C "$auth_src" archive "$revision" | docker build -t "auth-under-test:$revision" \
+  --build-arg VERSION="$revision" --build-arg GIT_COMMIT="$revision" \
+  --build-arg BUILD_DATE="$(git -C "$auth_src" show -s --format=%cI "$revision")" -
+make integration-run AUTH_IMAGE="$(docker image inspect --format '{{.Id}}' "auth-under-test:$revision")" \
+  AUTH_FGA_MODEL_FILE="$model_file"
+)
+```
 
 ## Данные перед тестами и отдельно
 
@@ -342,3 +353,7 @@ uv run --frozen python -m pytest --collect-only tests/webserver
 основные ожидания и порядок чтения очередей. Перед обогащением данных тест создаёт локальную копию.
 
 Подготовка опционального токена (`optional_token`) находится в `tests/fixtures/auth_jwt.py`.
+
+### Диагностика контейнерного прогона
+
+Внешние тесты используют штатный образ auth-service. Для проверки отказов стенд изолирует соединения с зависимостями и предоставляет журналы текущего запуска. При ошибке CI сохраняет диагностику в артефакте `auth-operations-logs`.

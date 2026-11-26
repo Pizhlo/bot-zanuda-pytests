@@ -35,7 +35,11 @@ class TestAuthServiceV0Notes:
         auth_service_error_messages_from_rabbitmq: ContextManager[Optional[bytes]],
         expected_audit_message: audit.AuditMessage,
     ) -> None:
-        """Тест на фильтрацию заметок."""
+        """Проверяет, какие из запрошенных заметок сервис возвращает пользователю и какие из них он может редактировать.
+
+        Результат зависит от пространства и роли пользователя. Неизвестные UUID не расширяют список доступных
+        заметок. Для недопустимого запроса проверяются HTTP-отказ и соответствующий аудит.
+        """
         token = login
 
         response = auth_service_v0_api_client.filter_notes(
@@ -43,9 +47,8 @@ class TestAuthServiceV0Notes:
         )
         log_internal_server_error(response, logger, fields.ERROR_FIELD)
 
-        with auth_service_error_messages_from_rabbitmq as rabbitmq_message:
-            message = rabbitmq_message
-        assert_audit_payload(message, expected_audit_message)
+        with auth_service_error_messages_from_rabbitmq as message:
+            assert_audit_payload(message, expected_audit_message)
 
         assert response.status_code == case.expected_status_code, response.text
 
@@ -67,7 +70,11 @@ class TestAuthServiceV0Notes:
         jwt_token_factory: Callable[..., str],
         auth_service_error_messages_from_rabbitmq: ContextManager[Optional[bytes]],
     ) -> None:
-        """Тест на фильтрацию заметок."""
+        """Проверяет отказ в фильтрации заметок при ошибке в токене сервисного клиента или в заголовке пользователя.
+
+        Отсутствующий или недействительный JWT даёт 401 Unauthorized. Если токен действителен, а Telegram ID
+        содержит ведущий ноль, сервис возвращает 400 Bad Request. Событие аудита соответствует причине отказа.
+        """
         token = optional_token(jwt_token_factory, invalid_case.token_fields)
 
         response = auth_service_v0_api_client.filter_notes(
@@ -76,10 +83,8 @@ class TestAuthServiceV0Notes:
             x_telegram_user_id=invalid_case.telegram_user_id,
         )
 
-        with auth_service_error_messages_from_rabbitmq as rabbitmq_message:
-            message = rabbitmq_message
-
-        assert_audit_payload(message, expected_audit_message)
+        with auth_service_error_messages_from_rabbitmq as message:
+            assert_audit_payload(message, expected_audit_message)
 
         assert response.status_code == invalid_case.expected_status_code, response.text
 

@@ -12,6 +12,8 @@ Currently testing web server and auth service APIs.
 
 ## Test Categories
 
+Service repositories own unit and component integration tests for their adapters, storage formats, CLI tools, migrations and embedded policies. Pytests exercises the public interfaces of the standard service image, including failures of real dependencies. Tests may inspect storage and logs to confirm an externally initiated operation and its side effects. Testkit owns the environment lifecycle and isolation.
+
 ### API Tests
 - HTTP requests to services
 - Validate status codes, response bodies, headers
@@ -242,3 +244,62 @@ IDs/digests and pytest results, then attempt cleanup even after preparation or l
 errors. Local container success SHALL clean up its resources; failures SHALL retain
 them and diagnostics. Host runs SHALL retain IDE infrastructure. Cleanup SHALL
 never adopt or remove another project's resources.
+
+
+### Auth-service compatibility with BZ-167
+
+For note filtering and resource synchronization, check the single HTTP audit event and its first failure. The event identifies the endpoint operation, the stage, the safe cause and the verified internal user when available. Login tests check the JWT or the HTTP error. Audit assertions for login are deferred until HTTP login auditing is implemented.
+
+A successful synchronization returns the resource with its attributes (null when absent). Space creation requires the verified owner and space type, and returns the owner, created and type relationships. An error identifies the resource by type and ID.
+
+
+### Single-action decisions
+
+Exercise POST /api/v0/decisions/check as a registered bot user against the pinned authorization model and field policy. Check the HTTP outcome, stable reason codes and the requested identity, action and resource. Repeating a request ID creates a new decision, including for a denial. Persisted reasons are independent of whether the HTTP client requested them. A mismatched subject returns 403 and creates no decision. Fixtures own their SQL identities, decision request IDs and graph objects, including cleanup after a failed assertion.
+
+Nginx enforces the deployment's request-body size limit at ingress. Pytests calls auth-service directly. For an owner reading a shared space, appending 1 MiB of trailing JSON whitespace to the valid request SHALL still produce HTTP 200, `allow` and the reason `allowed_via_fga_relation`. The padding exercises the direct handler with a body larger than 1 MiB to catch a second size cutoff in auth-service.
+
+Space decisions cover create, read, rename and delete for every role. Only the verified owner may rename either kind or delete a shared space. A personal space cannot be deleted. Missing, contradictory or unknown space types grant no access. All registered users can create shared spaces; personal creation checks the user's existing personal-space marker.
+
+Note decisions cover creation in each parent space, reading, updating and deleting. Cross the caller's space role with the record author's role, including a registered nonmember. Shared authors retain ownership rights without membership. In personal spaces only the space owner has access. Exercise orphans, conflicting or missing type markers, a second parent, a conflicting supplied space_id and unknown notes. Check title/text masks, repeated fields, unknown and technical fields.
+
+Reminder decisions exercise the same role, ownership and parent combinations for create, read, update and delete. Stop is an independent action authorized by can_stop without a field mask. Reminder fields are title and remind_at, while the note-only text field is forbidden.
+
+Member decisions cross the caller's role, target's existing role, requested role, and add/edit/remove action. Include self-management, an admin managing another admin, attempts to change the owner, and a registered or unknown target without membership. Personal spaces deny all member changes, including changes initiated by their owner. Only viewer, editor and admin may be assigned; remove accepts no role.
+
+Direct POST /api/v0/resources/update SHALL enforce the stored space type and ownership even when the caller supplies a decision_id. Reject creation with a missing, unsupported or ambiguous type or a foreign owner, attempts to change the stored type, deletion of a personal space, membership changes in a personal space and changes to the owner's membership in a shared space. A rejected request SHALL return HTTP 400 with its request_id and resource ID, status `error`, result `failed` and error code `VALIDATION_FAILED`. With RabbitMQ available, each attempt SHALL produce a correlated failed `fga.update_resource` event with the same error code, stage `check_space_privacy` and a nonempty cause. The space relationships and personal-space markers SHALL remain unchanged, including after a retry with fresh request and idempotency keys.
+
+After successful personal-space synchronization, a second create decision for the owner is denied. A check alone never reserves the personal slot. Concurrent writes for two personal IDs owned by one user, or one space ID requested by different owners and types, yield one success and one conflict. Read the resulting relationships or decisions to verify that the losing write left no partial object.
+
+Only POST /api/v0/decisions/check SHALL require the exact canonical JSON field names at every object level. Reject a noncanonical spelling, a repeated field or a case collision even when the values agree. Before authorization or persistence, return HTTP 400 `invalid_request`, emit a correlated failed `check_decision` event at `decode_request` and create no decision row. A uniquely supplied canonical, valid request_id identifies that error. If request_id itself is repeated or ambiguous, no body ID is trusted: omit it from the error JSON and use the HTTP request correlation ID in the response header and audit.
+
+Reject unsupported action/resource pairs and action-specific attributes with a field-level 400. Relational denial takes precedence over field restrictions. Check both consistency options and the public reasons switch. An early token rejection uses a valid X-Request-ID across the response and audit; otherwise a generated ID appears in the response header and event, with the rejected body unread.
+
+
+Completed RabbitMQ deliveries for both allow and deny SHALL match the HTTP result, request ID and decision ID.
+The completed audit of first personal space creation SHALL name the personal type and the subject's
+`has_personal_space` check. Member audit SHALL include `target_is_owner` only after the secondary check
+returned a boolean. A denied primary relation skips that check.
+
+#### Dependency failures during a decision check
+
+For each valid request below, make one dependency unavailable after the service is ready.
+`POST /api/v0/decisions/check` SHALL return HTTP 503 with exactly `error_code`, `message`
+and the submitted `request_id` in the JSON body. The `X-Request-ID` response header SHALL
+match that ID. PostgreSQL SHALL contain no decision row for that request.
+
+| Operation and failure | HTTP and audit `error_code` | HTTP and audit `message` | Audit stage |
+| --- | --- | --- | --- |
+| Renaming a shared space as its owner fails during trusted identity lookup. | `identity_store_unavailable` | `Identity store is unavailable` | `verify_subject` |
+| Renaming a shared space as its owner fails during the OpenFGA permission check. | `openfga_unavailable` | `Relationship check is unavailable` | `check_relation` |
+| Creating a shared space fails when OpenFGA cannot return the pinned model. | `openfga_unavailable` | `Relationship check is unavailable` | `check_relation` |
+| Creating a personal space fails when OpenFGA cannot check the user's `has_personal_space` relation. | `openfga_unavailable` | `Relationship check is unavailable` | `check_relation` |
+| A nonmember requests a shared-space rename. PostgreSQL rejects the insert after the service computes `deny`. | `decision_store_unavailable` | `Decision store is unavailable` | `save_decision` |
+| The owner requests a shared-space rename. PostgreSQL rejects the insert after the service computes `allow`. | `decision_store_unavailable` | `Decision store is unavailable` | `save_decision` |
+
+With RabbitMQ available, each attempt SHALL deliver one terminal `check_decision` event
+with status `failed`, the same request ID, error code and message, and the stage listed above.
+Identity and OpenFGA failures SHALL omit `decision_id` and `decision` from the event context.
+For both insert failures, the event context SHALL retain the computed `allow` or `deny`,
+a nonzero `decision_id`, the pinned `authorization_model_id` and the active `policy_version`.
+The service's component tests cover failures within the embedded field policy.
